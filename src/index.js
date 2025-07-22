@@ -40,7 +40,7 @@ function loadDevices(status) {
   if (Array.isArray(config.devices) && config.devices.length) {
     return config.devices;
   }
-  const defaultBaud = (config.serial && config.serial.baudRate) || 9600;
+  const defaultBaud = (config.serial && config.serial.baudRate) || 38400;
   return status.devices.map((d, idx) => ({ path: d.path, baudRate: defaultBaud, channelId: idx, type: 'vtr' }));
 }
 
