@@ -1,0 +1,19 @@
+{
+  "name": "flexicart-control",
+  "version": "0.1.0",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "NODE_ENV=development nodemon src/index.js",
+    "start": "NODE_ENV=production node src/index.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "express": "^4.x",
+    "ws": "^8.x",
+    "serialport": "^10.x"
+  },
+  "devDependencies": {
+    "jest": "^29.x",
+    "nodemon": "^2.x"
+  }
+}

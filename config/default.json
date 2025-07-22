@@ -1,0 +1,13 @@
+{
+  "httpPort": 3000,
+  "httpsPort": 3443,
+  "tls": {
+    "key": "/etc/flexicart-control/ssl/key.pem",
+    "cert": "/etc/flexicart-control/ssl/cert.pem"
+  },
+  "rs422Devices": [
+    { "type": "vtr", "channelId": 1, "path": "/dev/ttyRP0", "baudRate": 38400 },
+    { "type": "vtr", "channelId": 2, "path": "/dev/ttyRP1", "baudRate": 38400 },
+    { "type": "flexicart", "channelId": 3, "path": "/dev/ttyRP2", "baudRate": 38400 }
+  ]
+}

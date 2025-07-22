@@ -1,0 +1,12 @@
+[Unit]
+Description=Flexicart Control Service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/node /opt/flexicart-control/src/index.js
+Restart=on-failure
+User=flexicart
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
