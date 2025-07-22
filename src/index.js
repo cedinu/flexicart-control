@@ -20,37 +20,45 @@ const statusPath = path.join(__dirname, '../config/status.json');
 
 // Autoscan available serial ports and write to status.json
 async function autoscanDevices() {
-  try {
-    const portsList = (await SerialPort.list())
-      .filter(p => /^\/dev\/ttyRP(?:[0-9]|1[0-5])$/.test(p.path));
-    const status = {
-      timestamp: new Date().toISOString(),
-      devices: portsList.map(p => ({ path: p.path, manufacturer: p.manufacturer, serialNumber: p.serialNumber, pnpId: p.pnpId, vendorId: p.vendorId, productId: p.productId }))
-    };
-    fs.writeFileSync(statusPath, JSON.stringify(status, null, 2));
-    console.log(`Autoscan: wrote detected serial ports to ${statusPath}`);
-    return status;
-  } catch (err) {
-    console.error('Autoscan failed:', err);
-    return { timestamp: new Date().toISOString(), devices: [] };
+  const VTR_PORTS = Array.from({length: 16}, (_, i) => `/dev/ttyRP${i}`);
+  const usable = [];
+
+  for (const portPath of VTR_PORTS) {
+    // skip paths that don’t exist
+    if (!fs.existsSync(portPath)) continue;
+
+    try {
+      // attempt to open & immediately close at 38400 baud
+      await new Promise((res, rej) => {
+        const p = new SerialPort({ path: portPath, baudRate: 38400, autoOpen: false });
+        p.open(err => err ? rej(err) : p.close(res));
+      });
+      usable.push({ path: portPath });
+    } catch (_err) {
+      // can’t open / no VTR there
+    }
   }
+
+  const status = {
+    timestamp: new Date().toISOString(),
+    devices: usable
+  };
+  fs.writeFileSync(statusPath, JSON.stringify(status, null, 2));
+  console.log(`Autoscan: found ${usable.length} VTR ports → ${statusPath}`);
+  return status;
 }
 
 function loadDevices(status) {
-  // if user config exists, use that…
   if (Array.isArray(config.devices) && config.devices.length > 0) {
     return config.devices;
   }
-  // otherwise use all RP ports found in status.json
   const defaultBaud = (config.serial && config.serial.baudRate) || 38400;
-  return status.devices
-    .filter(d => /^\/dev\/ttyRP(?:[0-9]|1[0-5])$/.test(d.path))
-    .map((d, idx) => ({
-      path:      d.path,
-      baudRate:  defaultBaud,
-      channelId: idx,
-      type:      'vtr'
-    }));
+  return status.devices.map((d, idx) => ({
+    path:      d.path,
+    baudRate:  defaultBaud,
+    channelId: idx,
+    type:      'vtr'
+  }));
 }
 
 
