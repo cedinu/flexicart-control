@@ -21,7 +21,8 @@ const statusPath = path.join(__dirname, '../config/status.json');
 // Autoscan available serial ports and write to status.json
 async function autoscanDevices() {
   try {
-    const portsList = await SerialPort.list();
+    const portsList = (await SerialPort.list())
+      .filter(p => /^\/dev\/ttyRP(?:[0-9]|1[0-5])$/.test(p.path));
     const status = {
       timestamp: new Date().toISOString(),
       devices: portsList.map(p => ({ path: p.path, manufacturer: p.manufacturer, serialNumber: p.serialNumber, pnpId: p.pnpId, vendorId: p.vendorId, productId: p.productId }))
