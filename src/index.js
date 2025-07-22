@@ -3,6 +3,7 @@ const express = require('express');
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
+const { autoScanVtrs } = require('./commands/vtr_interface');
 const path = require('path');
 const WebSocket = require('ws');
 const { SerialPort } = require('serialport');
