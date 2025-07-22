@@ -1,27 +1,50 @@
 // src/commands/vtr.js
-const { Buffer } = require('buffer');
-const { COMMANDS } = require('./vtr_commands');
+const EventEmitter = require('events');
 
-function calculateChecksum(bytes) {
-  return bytes.reduce((sum, b) => (sum + b) & 0xFF, 0);
+const ports = new Map();
+const emitter = new EventEmitter();
+
+/**
+ * Register a SerialPort instance under a channel ID for VTR commands
+ * @param {number} channelId
+ * @param {SerialPort} port
+ */
+function registerPort(channelId, port) {
+  ports.set(channelId, port);
+  // Optional: listen for incoming data
+  port.on('data', data => {
+    emitter.emit(`data:${channelId}`, data);
+  });
 }
 
-function buildCommand(cmd1, cmd2, data = []) {
-  const header = [cmd1 & 0xFF, data.length & 0xFF, cmd2 & 0xFF, ...data.map(d => d & 0xFF)];
-  const checksum = calculateChecksum(header);
-  return Buffer.from([...header, checksum]);
+/**
+ * Send a command object over the serial port and await a response
+ * @param {number} channelId
+ * @param {Object} command
+ * @returns {Promise<any>}
+ */
+async function executeCommand(channelId, command) {
+  const port = ports.get(channelId);
+  if (!port) throw new Error(`VTR channel ${channelId} not initialized`);
+
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(command);
+    port.write(payload + '\r');
+    const onData = data => {
+      clearTimeout(timer);
+      emitter.removeListener(`data:${channelId}`, onData);
+      try {
+        resolve(JSON.parse(data.toString()));
+      } catch (err) {
+        resolve(data.toString());
+      }
+    };
+    const timer = setTimeout(() => {
+      emitter.removeListener(`data:${channelId}`, onData);
+      reject(new Error('VTR: response timeout'));
+    }, 5000);
+    emitter.on(`data:${channelId}`, onData);
+  });
 }
 
-function buildSpeedCommand(type, speedByte, extra = 0x00) {
-  const def = COMMANDS[type];
-  if (!def) throw new Error(`Unknown speed command: ${type}`);
-  const cmd1 = def.cmd1Base;
-  return buildCommand(cmd1, def.cmd2, [speedByte & 0xFF, extra & 0xFF]);
-}
-
-module.exports = {
-  buildCommand,
-  calculateChecksum,
-  buildSpeedCommand,
-  COMMANDS,
-};
+module.exports = { registerPort, executeCommand };
