@@ -4,112 +4,83 @@ const path = require('path');
 const express = require('express');
 const { SerialPort } = require('serialport');
 
-const vtrModule = require('./commands/vtr');
-const flexicartModule = require('./commands/flexicart');
-const { autoScanVtrs } = require('./commands/vtr_interface');
-const { autoScanFlexicarts } = require('./commands/flexicart_interface');
+const vtrInterface = require('./commands/vtr_interface');
+const flexInterface = require('./commands/flexicart_interface');
 
 const config = require('../config/default.json');
 const statusPath = path.join(__dirname, '../config/status.json');
 
 /**
- * Run the VTR & Flexicart autoscan routines and write out status.json
+ * Scan for VTRs and Flexicarts, produce human-readable device entries
  */
 async function autoscanDevices() {
-  const vtrs = await autoScanVtrs();
-  let flexs = [];
-  try {
-    flexs = await autoScanFlexicarts();
-  } catch (_) {
-    // no flexicarts found or scanner not implemented
-  }
+  const rawVtrs  = await vtrInterface.autoScanVtrs();
+  const rawFlex  = await flexInterface.autoScanFlexicarts().catch(() => []);
+
+  const vtrs = rawVtrs.map(v => ({
+    path:  v.port,
+    type:  'vtr',
+    model: v.model || v.modelCode,
+    status: Array.isArray(v.transport) ? v.transport.join(' | ') : v.transport,
+    hours: v.operationHours
+  }));
+
+  const flexs = rawFlex.map(f => ({
+    path:    f.port,
+    type:    'flexicart',
+    model:   f.model,
+    status:  f.status,
+    uptime:  f.uptime
+  }));
 
   const devices = [...vtrs, ...flexs];
-  const status = {
-    timestamp: new Date().toISOString(),
-    devices
-  };
+  const status = { timestamp: new Date().toISOString(), devices };
   fs.writeFileSync(statusPath, JSON.stringify(status, null, 2));
-  console.log(`Autoscan: wrote detected devices to ${statusPath}`);
+  console.log(`Autoscan: wrote ${devices.length} devices to ${statusPath}`);
   return status;
 }
 
 /**
- * Load the list of devices either from user config or from last scan
- */
-function loadDevices(status) {
-  // 1) if the user has explicitly configured devices, use that
-  if (Array.isArray(config.devices) && config.devices.length > 0) {
-    return config.devices;
-  }
-  // 2) otherwise take whatever we scanned
-  const defaultBaud = (config.serial && config.serial.baudRate) || 38400;
-  return status.devices.map((d, idx) => ({
-    path:      d.path,
-    baudRate:  defaultBaud,
-    channelId: idx,
-    type:      d.type
-  }));
-}
-
-/**
- * Initialize serial ports, register them with the command modules, and start HTTP API
+ * Initialize serial ports and start HTTP API
  */
 async function init() {
-  // load existing scan or re-scan if missing
-  let status;
-  if (fs.existsSync(statusPath)) {
-    try {
-      status = JSON.parse(fs.readFileSync(statusPath));
-    } catch {
-      status = await autoscanDevices();
-    }
-  } else {
-    status = await autoscanDevices();
-  }
+  // Always rescan at startup
+  const status = await autoscanDevices();
+  const httpPort = config.port || 3000;
 
-  const devices = loadDevices(status);
-  if (devices.length === 0) {
-    console.log('No devices to initialize');
-  } else {
-    console.log(`Initializing ${devices.length} serial devices…`);
-    devices.forEach(device => {
+  // Open and register serial ports
+  if (!status.devices.length) console.log('No devices found during autoscan');
+  else {
+    console.log(`Initializing ${status.devices.length} devices…`);
+    status.devices.forEach((d, idx) => {
+      d.channel = idx;
       const port = new SerialPort({
-        path:      device.path,
-        baudRate:  device.baudRate,
-        dataBits:  8,
-        stopBits:  1,
-        parity:    'none',
-        autoOpen:  true
+        path:     d.path,
+        baudRate: config.serial?.baudRate || 38400,
+        dataBits: 8,
+        stopBits: 1,
+        parity:   'none',
+        autoOpen: true
       }, err => {
-        if (err) {
-          console.error(`Serial port error on channel ${device.channelId}:`, err);
-        }
+        if (err) console.error(`Serial error on ${d.path}:`, err.message);
       });
 
-      if (device.type === 'vtr') {
-        vtrModule.registerPort(device.channelId, port);
-      } else if (device.type === 'flexicart') {
-        flexicartModule.registerPort(device.channelId, port);
-      }
+      if (d.type === 'vtr') vtrInterface.registerPort(idx, port);
+      else if (d.type === 'flexicart') flexInterface.registerPort(idx, port);
     });
   }
 
   // HTTP API
   const app = express();
   app.use(express.json());
+  app.get('/api/devices', (req,res) => res.json(status.devices));
+  app.get('/api/status',  (req,res) => res.json(status));
+  app.get('/api/config',  (req,res) => res.json(config));
 
-  app.get('/api/devices', (req, res) => res.json(devices));
-  app.get('/api/status',  (req, res) => res.json(status));
-  app.get('/api/config',  (req, res) => res.json(config));
-
-  const httpPort = config.port || 3000;
-  app.listen(httpPort, () => {
-    console.log(`Listening on port ${httpPort}`);
-  });
+  app.listen(httpPort, () => console.log(`Listening on port ${httpPort}`));
 }
 
 init().catch(err => {
-  console.error('Initialization failed:', err);
+  console.error('Init failed:', err);
   process.exit(1);
 });
