@@ -36,21 +36,20 @@ async function autoscanDevices() {
   }
 }
 
-// Load devices from status.json
 function loadDevices(status) {
-  // if the user explicitly listed devices in config we'll use those…
+  // if user config exists, use that…
   if (Array.isArray(config.devices) && config.devices.length > 0) {
     return config.devices;
   }
-  // otherwise pick up everything from status.json
+  // otherwise use all RP ports found in status.json
   const defaultBaud = (config.serial && config.serial.baudRate) || 38400;
   return status.devices
-    .filter(d => /^\/dev\/ttyRP(?:[0-9]|1[0-5])$/.test(d.path))  // only RP ports
+    .filter(d => /^\/dev\/ttyRP(?:[0-9]|1[0-5])$/.test(d.path))
     .map((d, idx) => ({
-      path:   d.path,
-      baudRate: defaultBaud,
+      path:      d.path,
+      baudRate:  defaultBaud,
       channelId: idx,
-      type:   'vtr'
+      type:      'vtr'
     }));
 }
 
