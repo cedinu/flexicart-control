@@ -37,31 +37,22 @@ async function autoscanDevices() {
 
 // Load devices from status.json
 function loadDevices(status) {
-  // If default config defines devices, use that
   if (Array.isArray(config.devices) && config.devices.length) {
     return config.devices;
   }
-  // Fallback: map scanned ports to default device entries
   const defaultBaud = (config.serial && config.serial.baudRate) || 9600;
-  return status.devices.map((d, idx) => ({
-    path: d.path,
-    baudRate: defaultBaud,
-    channelId: idx,
-    type: 'vtr'
-  }));
+  return status.devices.map((d, idx) => ({ path: d.path, baudRate: defaultBaud, channelId: idx, type: 'vtr' }));
 }
 
 (async function init() {
-  // 1. Autoscan and write status
   const status = await autoscanDevices();
 
-  // 2. HTTP/HTTPS setup
   const useHttps = process.env.NODE_ENV === 'production';
   const server = useHttps
     ? https.createServer({ key: fs.readFileSync(config.tls.key), cert: fs.readFileSync(config.tls.cert) }, app)
     : http.createServer(app);
 
-  // 3. Expose API for status/devices
+  // API to fetch current scanned devices
   app.get('/api/devices', (req, res) => {
     const fresh = fs.existsSync(statusPath)
       ? JSON.parse(fs.readFileSync(statusPath))
@@ -69,7 +60,7 @@ function loadDevices(status) {
     res.json(fresh);
   });
 
-  // 4. WebSocket server
+  // WebSocket server setup
   const wss = new WebSocket.Server({ server });
   wss.on('connection', ws => {
     ws.on('message', async message => {
@@ -86,7 +77,7 @@ function loadDevices(status) {
       }
       try {
         const runner = target === 'vtr' ? vtrModule : target === 'flexicart' ? flexicartModule : null;
-        if (!runner) throw new Error(`Unknown target: ${target}`);
+        if (!runner || typeof runner.executeCommand !== 'function') throw new Error(`Unknown target: ${target}`);
         const result = await runner.executeCommand(channel, command);
         ws.send(JSON.stringify({ ok: true, result }));
       } catch (err) {
@@ -96,7 +87,7 @@ function loadDevices(status) {
     });
   });
 
-  // 5. Initialize serial ports from dynamic device list
+  // Initialize serial ports
   const devices = loadDevices(status);
   if (!devices.length) console.warn('No devices to initialize');
 
@@ -107,11 +98,24 @@ function loadDevices(status) {
     }
     const port = new SerialPort({ path: device.path, baudRate: device.baudRate, dataBits: 8, stopBits: 1, parity: 'none' });
     port.on('error', err => console.error(`Serial port error on channel ${device.channelId}:`, err));
-    if (device.type === 'vtr') vtrModule.registerPort(device.channelId, port);
-    else if (device.type === 'flexicart') flexicartModule.registerPort(device.channelId, port);
-    else console.warn(`Unknown device type: ${device.type}`);
+
+    // Register port if supported by module
+    if (device.type === 'vtr') {
+      if (typeof vtrModule.registerPort === 'function') {
+        vtrModule.registerPort(device.channelId, port);
+      } else {
+        console.warn('vtrModule.registerPort() not available; skipping port registration for channel', device.channelId);
+      }
+    } else if (device.type === 'flexicart') {
+      if (typeof flexicartModule.registerPort === 'function') {
+        flexicartModule.registerPort(device.channelId, port);
+      } else {
+        console.warn('flexicartModule.registerPort() not available; skipping port registration for channel', device.channelId);
+      }
+    } else {
+      console.warn(`Unknown device type: ${device.type} for channel ${device.channelId}`);
+    }
   });
 
-  // 6. Start server
   server.listen(config.httpPort, () => console.log(`Listening on port ${config.httpPort}`));
 })();
