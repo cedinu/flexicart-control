@@ -1,9 +1,7 @@
 const { autoScanVtrs, getVtrStatus, VTR_PORTS, humanizeStatus, sendCommand } = require('../src/commands/vtr_interface');
 
 /**
- * Calculate Sony protocol checksum - CORRECTED VERSION
- * @param {Buffer} commandBytes - Command bytes (excluding STX and ETX)
- * @returns {number} - Checksum byte
+ * Calculate simple Sony 9-pin checksum (XOR of all bytes)
  */
 function calculateChecksum(commandBytes) {
   let checksum = 0;
@@ -14,31 +12,22 @@ function calculateChecksum(commandBytes) {
 }
 
 /**
- * Create Sony command with proper checksum - CORRECTED VERSION
- * @param {Array} cmdBytes - Array of command bytes [CMD1, CMD2, DATA1, DATA2, ...]
- * @returns {Buffer} - Complete command buffer with STX, checksum, and ETX
+ * Create Sony 9-pin command with checksum
  */
 function createSonyCommand(cmdBytes) {
   const checksum = calculateChecksum(Buffer.from(cmdBytes));
-  return Buffer.from([0x88, ...cmdBytes, checksum, 0xFF]);
+  return Buffer.from([...cmdBytes, checksum]);
 }
 
 /**
- * Verify if a command has correct checksum - CORRECTED VERSION
- * @param {Buffer} command - Complete command buffer
- * @returns {boolean} - True if checksum is correct
+ * Verify Sony 9-pin checksum
  */
 function verifyChecksum(command) {
-  if (command.length < 4) return false;
-  if (command[0] !== 0x88 || command[command.length - 1] !== 0xFF) return false;
+  if (command.length < 2) return false;
   
-  const commandBytes = command.slice(1, -2); // Remove STX, checksum, and ETX
-  const providedChecksum = command[command.length - 2];
+  const commandBytes = command.slice(0, -1); // All but last byte
+  const providedChecksum = command[command.length - 1];
   const calculatedChecksum = calculateChecksum(commandBytes);
-  
-  console.log(`   Debug: Command bytes: ${commandBytes.toString('hex')}`);
-  console.log(`   Debug: Provided checksum: 0x${providedChecksum.toString(16)}`);
-  console.log(`   Debug: Calculated checksum: 0x${calculatedChecksum.toString(16)}`);
   
   return providedChecksum === calculatedChecksum;
 }
