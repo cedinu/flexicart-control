@@ -781,45 +781,60 @@ function showTroubleshootingGuide() {
 }
 
 /**
- * Test commands with proper checksums
+ * Test VTR model-specific command variations
  */
-async function testChecksumCommands(path) {
-  console.log(`🧮 Testing Sony commands with proper checksums on ${path}...`);
+async function testModelVariants(path) {
+  console.log(`🎬 Testing VTR model-specific commands on ${path}...`);
   
-  const testCommands = [
-    { name: 'Device Type', cmd: VTR_COMMANDS_CORRECTED.DEVICE_TYPE },
-    { name: 'Status Simple', cmd: VTR_COMMANDS_CORRECTED.STATUS_SIMPLE },
-    { name: 'Status Extended', cmd: VTR_COMMANDS_CORRECTED.STATUS },
-    { name: 'Local Disable', cmd: VTR_COMMANDS_CORRECTED.LOCAL_DISABLE },
-    { name: 'Timecode', cmd: VTR_COMMANDS_CORRECTED.TIMECODE }, // Fixed: removed _SIMPLE
-    { name: 'Stop', cmd: VTR_COMMANDS_CORRECTED.STOP },
-    { name: 'Play', cmd: VTR_COMMANDS_CORRECTED.PLAY }
+  const variants = [
+    // Try commands with different device IDs in the command
+    { name: 'Device ID 0x00', cmd: Buffer.from([0x00, 0x61, 0x61]) },
+    { name: 'Device ID 0x10', cmd: Buffer.from([0x10, 0x61, 0x71]) },
+    { name: 'Device ID 0x20', cmd: Buffer.from([0x20, 0x61, 0x41]) },
+    { name: 'Device ID 0x30', cmd: Buffer.from([0x30, 0x61, 0x51]) },
+    
+    // HDW-specific variants
+    { name: 'HDW Status A', cmd: Buffer.from([0x61, 0x0A, 0x6B]) },
+    { name: 'HDW Status B', cmd: Buffer.from([0x62, 0x20, 0x42]) },
+    
+    // DVW-specific variants  
+    { name: 'DVW Status', cmd: Buffer.from([0x60, 0x20, 0x40]) },
+    { name: 'DVW Device', cmd: Buffer.from([0x01, 0x11, 0x10]) },
+    
+    // BVW legacy variants
+    { name: 'BVW Ping', cmd: Buffer.from([0x01, 0x01]) },
+    { name: 'BVW Status', cmd: Buffer.from([0x02, 0x02]) },
+    
+    // Try reversed byte order
+    { name: 'Reversed Status', cmd: Buffer.from([0x20, 0x61, 0x41]) },
+    
+    // Try commands without parameters
+    { name: 'Status Only', cmd: Buffer.from([0x61]) },
+    { name: 'Device Only', cmd: Buffer.from([0x00]) },
+    
+    // Try with different start bytes
+    { name: 'Alt Start 1', cmd: Buffer.from([0x02, 0x61, 0x63]) },
+    { name: 'Alt Start 2', cmd: Buffer.from([0x12, 0x61, 0x73]) }
   ];
   
   let workingCommands = 0;
-  let ackCommands = [];
   
-  for (const test of testCommands) {
-    // Add safety check for undefined commands
-    if (!test.cmd) {
-      console.log(`\n❌ ${test.name} command is undefined - skipping`);
-      continue;
-    }
-    
-    console.log(`\n📡 Testing ${test.name}...`);
-    console.log(`   Command: ${test.cmd.toString('hex')}`);
-    console.log(`   Checksum valid: ${verifyChecksum(test.cmd) ? '✅' : '❌'}`);
+  for (const variant of variants) {
+    console.log(`\n📡 Testing ${variant.name}...`);
+    console.log(`   Command: ${variant.cmd.toString('hex')}`);
     
     try {
-      const response = await sendCommand(path, test.cmd, 2000);
+      const response = await sendCommand(path, variant.cmd, 2000);
       if (response && response.length > 0) {
         console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
-        analyzeResponse(response, test.name);
+        analyzeResponse(response, variant.name);
         
-        if (response[0] === 0x10) { // ACK
+        if (response[0] === 0x10) {
+          console.log(`   🎯 SUCCESS! ${variant.name} worked!`);
           workingCommands++;
-          ackCommands.push(test.name);
-          console.log(`   🎯 SUCCESS! This command worked with proper checksum!`);
+          return variant; // Return first working variant
+        } else if (response[0] !== 0x11) {
+          console.log(`   📊 Different response - potential data!`);
         }
       } else {
         console.log(`   ⚠️  No response`);
@@ -831,22 +846,8 @@ async function testChecksumCommands(path) {
     await new Promise(resolve => setTimeout(resolve, 300));
   }
   
-  console.log(`\n📊 Checksum Test Results:`);
-  console.log(`   Commands tested: ${testCommands.length}`);
-  console.log(`   ACK responses: ${workingCommands}`);
-  
-  if (ackCommands.length > 0) {
-    console.log(`\n✅ Working commands with checksums:`);
-    ackCommands.forEach(cmd => console.log(`   - ${cmd}`));
-    console.log(`\n🎉 SUCCESS! Proper checksums fixed the communication!`);
-  } else {
-    console.log(`\n⚠️ Still no ACK responses. This suggests:`);
-    console.log(`   - VTR setup menu still has serial control disabled`);
-    console.log(`   - Different protocol variant needed`);
-    console.log(`   - Hardware/wiring issue`);
-  }
-  
-  return workingCommands > 0;
+  console.log(`\n📊 Model Variant Test Results: ${workingCommands} successful commands`);
+  return workingCommands > 0 ? true : null;
 }
 
 // Update the interactiveCheck function to include extended status testing
