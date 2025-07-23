@@ -118,6 +118,7 @@ function registerPort(id, port) {
 
 module.exports = {
   autoScanVtrs,
+  autoScanFlexicarts: autoScanVtrs,
   getVtrStatus,
   openPort,
   sendCommand,
