@@ -631,7 +631,107 @@ async function sendRawCommand(path, hexString) {
 }
 
 /**
- * Enhanced interactive checker with diagnostic options
+ * Try to establish proper VTR communication and remote control
+ */
+async function establishRemoteControl(path) {
+  console.log(`🔗 Attempting to establish remote control on ${path}...`);
+  
+  // Step 1: Try basic local disable command
+  console.log('\n1️⃣ Disabling local control...');
+  try {
+    const response1 = await sendCommand(path, VTR_COMMANDS.LOCAL_DISABLE, 2000);
+    console.log(`📥 Local Disable Response: ${response1.toString('hex')}`);
+    analyzeResponse(response1, 'Local Disable');
+    
+    // Wait a moment for the command to take effect
+    await new Promise(resolve => setTimeout(resolve, 500));
+  } catch (error) {
+    console.log(`❌ Local disable failed: ${error.message}`);
+  }
+  
+  // Step 2: Try alternative local disable commands
+  const alternativeCommands = [
+    { name: 'Local Disable Alt 1', cmd: Buffer.from([0x88, 0x01, 0x0C, 0x01, 0xFF]) },
+    { name: 'Local Disable Alt 2', cmd: Buffer.from([0x88, 0x01, 0x0C, 0x02, 0xFF]) },
+    { name: 'Remote Enable', cmd: Buffer.from([0x88, 0x01, 0x11, 0x01, 0xFF]) }
+  ];
+  
+  for (const alt of alternativeCommands) {
+    console.log(`\n📡 Trying ${alt.name}...`);
+    try {
+      const response = await sendCommand(path, alt.cmd, 2000);
+      console.log(`📥 Response: ${response.toString('hex')}`);
+      analyzeResponse(response, alt.name);
+      
+      if (response[0] === 0x10) { // ACK response
+        console.log(`✅ ${alt.name} successful!`);
+        break;
+      }
+    } catch (error) {
+      console.log(`❌ ${alt.name} failed: ${error.message}`);
+    }
+  }
+  
+  // Step 3: Test if status command now works
+  console.log('\n3️⃣ Testing status after remote control setup...');
+  try {
+    const statusResponse = await sendCommand(path, VTR_COMMANDS.STATUS, 3000);
+    console.log(`📥 Status Response: ${statusResponse.toString('hex')}`);
+    
+    if statusResponse[0] !== 0x11) {
+      console.log(`✅ Remote control established! VTR is now responding to commands.`);
+      return true;
+    } else {
+      console.log(`⚠️ Still getting NAK - VTR may need manual REMOTE button press`);
+      return false;
+    }
+  } catch (error) {
+    console.log(`❌ Status test failed: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Manual troubleshooting guide
+ */
+function showTroubleshootingGuide() {
+  console.log('\n🔧 VTR Troubleshooting Guide');
+  console.log('============================');
+  console.log('\nThe VTR is responding with NAK (0x11) which typically means:');
+  console.log('\n1️⃣ LOCAL Mode Issue (Most Common):');
+  console.log('   • Look for REMOTE/LOCAL button on VTR front panel');
+  console.log('   • Press REMOTE button to enable serial control');
+  console.log('   • Some VTRs have a LOCAL/REMOTE switch instead');
+  console.log('   • Check VTR display - should show "REMOTE" indicator');
+  
+  console.log('\n2️⃣ No Tape Loaded:');
+  console.log('   • Insert a tape cartridge');
+  console.log('   • Wait for tape to thread (may take 10-30 seconds)');
+  console.log('   • VTR should show tape counter/timecode');
+  
+  console.log('\n3️⃣ Tape Protection:');
+  console.log('   • Check if tape has record-protect tab');
+  console.log('   • Some commands blocked with protected tapes');
+  
+  console.log('\n4️⃣ VTR Menu Settings:');
+  console.log('   • Check VTR setup menu for "Remote Control" settings');
+  console.log('   • Verify serial control is enabled');
+  console.log('   • Check if specific control protocol is selected');
+  
+  console.log('\n5️⃣ Cable/Connection:');
+  console.log('   • Verify RS-422 cable connections');
+  console.log('   • Check TX+/TX- and RX+/RX- wiring');
+  console.log('   • Try different cable if available');
+  
+  console.log('\n💡 Next Steps:');
+  console.log('   1. Press REMOTE button on VTR front panel');
+  console.log('   2. Insert a tape if none is loaded');
+  console.log('   3. Run: node tests/check_vtr_status.js --raw /dev/ttyRP9 "88 01 61 20 FF"');
+  console.log('   4. If still NAK, check VTR menu settings');
+}
+
+/**
+ * Enhanced interactive checker with troubleshooting
  */
 async function interactiveCheck() {
   const args = process.argv.slice(2);
@@ -647,6 +747,8 @@ async function interactiveCheck() {
     console.log('  node tests/check_vtr_status.js /dev/ttyRP0        # Check specific port');
     console.log('  node tests/check_vtr_status.js --enhanced /dev/ttyRP0  # Enhanced check with diagnostics');
     console.log('  node tests/check_vtr_status.js --diagnose /dev/ttyRP0  # Full diagnostic check');
+    console.log('  node tests/check_vtr_status.js --remote /dev/ttyRP0    # Try to establish remote control');
+    console.log('  node tests/check_vtr_status.js --troubleshoot          # Show troubleshooting guide');
     console.log('  node tests/check_vtr_status.js --raw /dev/ttyRP0 "88 01 61 FF"  # Send raw hex command');
     console.log('  node tests/check_vtr_status.js --control /dev/ttyRP0  # Control VTR');
     console.log('  node tests/check_vtr_status.js --play /dev/ttyRP0     # Send play command');
@@ -656,6 +758,17 @@ async function interactiveCheck() {
     console.log('  node tests/check_vtr_status.js --list             # List all possible ports');
     console.log('  node tests/check_vtr_status.js --monitor /dev/ttyRP0  # Monitor VTR');
     console.log('  node tests/check_vtr_status.js --test /dev/ttyRP0     # Test commands');
+    
+  } else if (args[0] === '--remote' || args[0] === '-rem') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --remote /dev/ttyRP0');
+      return;
+    }
+    await establishRemoteControl(port);
+    
+  } else if (args[0] === '--troubleshoot' || args[0] === '-ts') {
+    showTroubleshootingGuide();
     
   } else if (args[0] === '--enhanced' || args[0] === '-e') {
     const port = args[1];
@@ -808,6 +921,8 @@ module.exports = {
   testVtrCommands,
   testCommunication,
   diagnosticCheck,
+  establishRemoteControl,
+  showTroubleshootingGuide,
   sendRawCommand,
   playVtr,
   pauseVtr,
