@@ -8,7 +8,7 @@ const WebSocket = require('ws');
 
 // Import CommonJS modules for VTR and Flexicart interfaces
 const vtrInterface = require('./commands/vtr_interface');
-const flexInterface = require('./commands/flex_interface');
+const flexInterface = require('./commands/flexicart_interface');
 
 const CONFIG_PATH = path.join(__dirname, 'config', 'status.json');
 const HTTP_PORT = process.env.PORT || 8080;
