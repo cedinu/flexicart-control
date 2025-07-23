@@ -1193,3 +1193,202 @@ module.exports = {
   analyzeResponse,
   VTR_COMMANDS
 };
+
+/**
+ * Diagnose menu configuration issues
+ */
+function diagnoseMenuIssue() {
+  console.log('\n🔧 VTR Menu Configuration Diagnosis');
+  console.log('===================================');
+  console.log('\n🚨 CONSISTENT NAK RESPONSES DETECTED');
+  console.log('\nYour VTR is responding with NAK (0x11) to ALL commands.');
+  console.log('This pattern indicates: SETUP MENU ISSUE');
+  
+  console.log('\n✅ What\'s Working:');
+  console.log('   • Physical connection (getting responses)');
+  console.log('   • Correct baud rate (38400)');
+  console.log('   • VTR is powered and functional');
+  
+  console.log('\n❌ What\'s NOT Working:');
+  console.log('   • VTR refuses to execute ANY command');
+  console.log('   • Even basic status requests are rejected');
+  
+  console.log('\n🎯 SOLUTION: Enable Serial Control in VTR Menu');
+  console.log('\n📋 Step-by-Step Instructions:');
+  console.log('   1. Press MENU button on VTR front panel');
+  console.log('   2. Navigate: SETUP → REMOTE (or similar path)');
+  console.log('   3. Find and ENABLE these settings:');
+  console.log('      • "9PIN REMOTE" → ON');
+  console.log('      • "RS422 REMOTE" → ON'); 
+  console.log('      • "REMOTE CONTROL" → ON');
+  console.log('      • "REMOTE TYPE" → 9PIN or RS422');
+  console.log('   4. SAVE settings');
+  console.log('   5. POWER CYCLE the VTR');
+  console.log('   6. Test again with: node tests/check_vtr_status.js --raw /dev/ttyRP9 "88 01 61 FF"');
+  
+  console.log('\n💡 Expected Result After Fix:');
+  console.log('   • Commands should return ACK (0x10) instead of NAK (0x11)');
+  console.log('   • Status commands should return actual status data');
+  console.log('   • Transport commands should control VTR operation');
+  
+  console.log('\n📖 If you can\'t find menu settings:');
+  console.log('   • Check VTR manual for "Remote Control Setup"');
+  console.log('   • Look for internal DIP switches');
+  console.log('   • Some models have jumpers inside the unit');
+  console.log('   • Contact Sony support with your exact VTR model');
+}
+
+// Update the interactiveCheck function to include this diagnosis
+async function interactiveCheck() {
+  const args = process.argv.slice(2);
+  
+  console.log('🎬 VTR Status Checker & Controller');
+  console.log('==================================');
+  
+  if (args.length === 0) {
+    await scanAllVtrs();
+  } else if (args[0] === '--help' || args[0] === '-h') {
+    console.log('\nUsage:');
+    console.log('  node tests/check_vtr_status.js --menuissue           # Diagnose menu configuration issues');
+    console.log('  node tests/check_vtr_status.js --menuhelp            # Show VTR menu settings guide');
+    console.log('  node tests/check_vtr_status.js                    # Scan all ports');
+    console.log('  node tests/check_vtr_status.js /dev/ttyRP0        # Check specific port');
+    console.log('  node tests/check_vtr_status.js --enhanced /dev/ttyRP0  # Enhanced check with diagnostics');
+    console.log('  node tests/check_vtr_status.js --diagnose /dev/ttyRP0  # Full diagnostic check');
+    console.log('  node tests/check_vtr_status.js --remote /dev/ttyRP0    # Try to establish remote control');
+    console.log('  node tests/check_vtr_status.js --alternative /dev/ttyRP0  # Test alternative command formats');
+    console.log('  node tests/check_vtr_status.js --notape /dev/ttyRP0    # Test commands that work without tape');
+    console.log('  node tests/check_vtr_status.js --tapestatus /dev/ttyRP0 # Check if tape is loaded');
+    console.log('  node tests/check_vtr_status.js --menuhelp             # Show VTR menu settings guide');
+    console.log('  node tests/check_vtr_status.js --troubleshoot          # Show troubleshooting guide');
+    console.log('  node tests/check_vtr_status.js --raw /dev/ttyRP0 "88 01 61 FF"  # Send raw hex command');
+    console.log('  node tests/check_vtr_status.js --control /dev/ttyRP0  # Control VTR');
+    console.log('  node tests/check_vtr_status.js --play /dev/ttyRP0     # Send play command');
+    console.log('  node tests/check_vtr_status.js --pause /dev/ttyRP0    # Send pause command');
+    console.log('  node tests/check_vtr_status.js --stop /dev/ttyRP0     # Send stop command');
+    console.log('  node tests/check_vtr_status.js --batch play port1 port2  # Batch control');
+    console.log('  node tests/check_vtr_status.js --list             # List all possible ports');
+    console.log('  node tests/check_vtr_status.js --monitor /dev/ttyRP0  # Monitor VTR');
+    console.log('  node tests/check_vtr_status.js --test /dev/ttyRP0     # Test commands');
+    
+  } else if (args[0] === '--menuissue' || args[0] === '-mi') {
+    diagnoseMenuIssue();
+    
+  } else if (args[0] === '--alternative' || args[0] === '-alt') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --alternative /dev/ttyRP0');
+      return;
+    }
+    await testAlternativeCommands(port);
+    
+  } else if (args[0] === '--menuhelp' || args[0] === '-menu') {
+    showVtrMenuGuide();
+    
+  } else if (args[0] === '--notape' || args[0] === '-nt') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --notape /dev/ttyRP0');
+      return;
+    }
+    await testNoTapeCommands(port);
+    
+  } else if (args[0] === '--tapestatus' || args[0] === '-ts') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --tapestatus /dev/ttyRP0');
+      return;
+    }
+    await checkTapeStatus(port);
+    
+  } else if (args[0] === '--remote' || args[0] === '-rem') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --remote /dev/ttyRP0');
+      return;
+    }
+    await establishRemoteControl(port);
+    
+  } else if (args[0] === '--troubleshoot' || args[0] === '-tr') {
+    showTroubleshootingGuide();
+    
+  } else if (args[0] === '--enhanced' || args[0] === '-e') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --enhanced /dev/ttyRP0');
+      return;
+    }
+    await checkSingleVtrEnhanced(port);
+    
+  } else if (args[0] === '--diagnose' || args[0] === '-d') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --diagnose /dev/ttyRP0');
+      return;
+    }
+    await diagnosticCheck(port);
+    
+  } else if (args[0] === '--raw' || args[0] === '-r') {
+    const port = args[1];
+    const hexCommand = args[2];
+    if (!port || !hexCommand) {
+      console.log('❌ Usage: --raw /dev/ttyRP0 "88 01 61 FF"');
+      return;
+    }
+    await sendRawCommand(port, hexCommand);
+    
+  } else if (args[0] === '--control' || args[0] === '-c') {
+    const port = args[1] || VTR_PORTS[0];
+    await controlVtr(port);
+    
+  } else if (args[0] === '--play') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --play /dev/ttyRP0');
+      return;
+    }
+    await playVtr(port);
+    
+  } else if (args[0] === '--pause') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --pause /dev/ttyRP0');
+      return;
+    }
+    await pauseVtr(port);
+    
+  } else if (args[0] === '--stop') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --stop /dev/ttyRP0');
+      return;
+    }
+    await stopVtr(port);
+    
+  } else if (args[0] === '--batch') {
+    const command = args[1];
+    const ports = args.slice(2);
+    if (!command || ports.length === 0) {
+      console.log('❌ Usage: --batch <command> <port1> [port2] ...');
+      console.log('   Commands: play, pause, stop, ff, rew');
+      return;
+    }
+    await batchControlVtrs(ports, command);
+    
+  } else if (args[0] === '--list' || args[0] === '-l') {
+    console.log('\n📍 Available VTR ports:');
+    VTR_PORTS.forEach((port, index) => {
+      console.log(`   ${index + 1}. ${port}`);
+    });
+    
+  } else {
+    const targetPort = args[0];
+    
+    if (!VTR_PORTS.includes(targetPort)) {
+      console.log(`⚠️  Warning: ${targetPort} is not in the standard VTR port list`);
+      console.log('   Checking anyway...');
+    }
+    
+    await checkSingleVtr(targetPort);
+  }
+}
