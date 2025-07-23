@@ -11,8 +11,11 @@ const CMD_TIMEOUT = 100; // ms
 
 /**
  * Send a Sony VTR command buffer, gather response, then close port.
+ * @param {SerialPort} port - SerialPort instance
+ * @param {Buffer} commandBuffer - Command to send as buffer
+ * @returns {Promise<Buffer>} Response buffer
  */
-function sendCommand(port, commandBuffer) {
+function sendCommandBuffer(port, commandBuffer) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     const cleanup = () => {
@@ -45,104 +48,9 @@ function sendCommand(port, commandBuffer) {
 }
 
 /**
- * Get VTR status from specified port
- * @param {string} path - Serial port path
- * @returns {Promise<Object>} VTR status object
- * @throws {Error} If path is invalid or communication fails
- */
-async function getVtrStatus(path) {
-  if (!path || typeof path !== 'string') {
-    throw new Error('Invalid port path provided');
-  }
-
-  try {
-    const buffer = await sendCommand(path, 'status');
-    return parseStatusData(buffer);
-  } catch (error) {
-    throw new Error(`Failed to get VTR status: ${error.message}`);
-  }
-}
-
-/**
- * Register a VTR port for monitoring
- * @param {string} path - Serial port path
- * @returns {Promise<boolean>} Success status
- * @throws {Error} If registration fails
- */
-async function registerPort(path) {
-  if (!path || typeof path !== 'string') {
-    throw new Error('Invalid port path provided');
-  }
-
-  try {
-    // Test connection first
-    await getVtrStatus(path);
-    
-    // Add to registered ports (implement storage logic here)
-    console.log(`Port ${path} registered successfully`);
-    return true;
-  } catch (error) {
-    throw new Error(`Failed to register port ${path}: ${error.message}`);
-  }
-}
-
-/**
- * Perform an autoscan of all known VTR port paths and return detected units.
- */
-async function autoScanVtrs() {
-  const results = [];
-  for (const path of VTR_PORTS) {
-    try {
-      const info = await getVtrStatus(path);
-      results.push(info);
-    } catch {
-      // port inactive or not a VTR
-    }
-  }
-  return results;
-}
-
-/**
- * Build a SerialPort object for Sony VTR communications.
- */
-function openPort(path) {
-  return new SerialPort({
-    path,
-    baudRate: VTR_BAUD,
-    dataBits: 8,
-    stopBits: 1,
-    parity: 'none',
-    autoOpen: false
-  });
-}
-
-/**
- * Turn raw status bits into a human-readable string.
- */
-function humanizeStatus(main, ext) {
-  const parts = [];
-  if (main.isRecording)      parts.push('REC');
-  else if (main.isPlaying)   parts.push('PLAY');
-  else                        parts.push('STOP');
-
-  if (main.isInEEMode)       parts.push('E-E');
-  if (ext.hoursOperated)     parts.push(`${ext.hoursOperated}h run`);
-
-  return parts.join(' • ');
-}
-
-/**
- * Stub for wiring up real-time listeners on an open port.
- */
-function registerPort(id, port) {
-  port.on('error', err => console.error(`VTR[${id}] serial error:`, err.message));
-  port.on('data',  data => {/* handle incoming unsolicited frames */});
-}
-
-/**
  * Send command to VTR and wait for response
  * @param {string} path - Serial port path
- * @param {string} command - Command to send
+ * @param {string|Buffer} command - Command to send
  * @param {number} timeout - Timeout in milliseconds (default: 5000)
  * @returns {Promise<Buffer>} Response buffer
  */
@@ -151,7 +59,7 @@ async function sendCommand(path, command, timeout = 5000) {
     throw new Error('Invalid port path provided');
   }
   
-  if (!command || typeof command !== 'string') {
+  if (!command) {
     throw new Error('Invalid command provided');
   }
 
@@ -192,6 +100,9 @@ async function sendCommand(path, command, timeout = 5000) {
       port = new SerialPort({
         path,
         baudRate: VTR_BAUD,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
         autoOpen: false
       });
 
@@ -201,7 +112,9 @@ async function sendCommand(path, command, timeout = 5000) {
 
       port.on('open', () => {
         try {
-          port.write(command + '\r\n');
+          // Handle both string and buffer commands
+          const commandData = Buffer.isBuffer(command) ? command : Buffer.from(command + '\r\n');
+          port.write(commandData);
         } catch (writeError) {
           safeReject(new Error(`Failed to write command: ${writeError.message}`));
         }
@@ -228,56 +141,117 @@ async function sendCommand(path, command, timeout = 5000) {
 }
 
 /**
- * Parse VTR status data from buffer
- * @param {Buffer} buffer - Raw status data from VTR
- * @returns {Object} Parsed status object
+ * Get VTR status from specified port
+ * @param {string} path - Serial port path
+ * @returns {Promise<Object>} VTR status object
+ * @throws {Error} If path is invalid or communication fails
  */
-function parseStatusData(buffer) {
-  if (!buffer || buffer.length === 0) {
-    return {
-      timecode: '00:00:00:00',
-      mode: 'stop',
-      speed: '1x',
-      tape: false,
-      error: 'No data received'
-    };
+async function getVtrStatus(path) {
+  if (!path || typeof path !== 'string') {
+    throw new Error('Invalid port path provided');
   }
 
   try {
-    // Convert buffer to string and parse
-    const data = buffer.toString('ascii').trim();
-    
-    // Example parsing logic - adjust based on actual VTR protocol
-    const lines = data.split('\n');
-    const status = {
-      timecode: '00:00:00:00',
-      mode: 'stop',
-      speed: '1x',
-      tape: false,
-      error: null
-    };
-
-    for (const line of lines) {
-      if (line.includes('TC:')) {
-        status.timecode = line.substring(3).trim();
-      } else if (line.includes('MODE:')) {
-        status.mode = line.substring(5).trim().toLowerCase();
-      } else if (line.includes('SPEED:')) {
-        status.speed = line.substring(6).trim();
-      } else if (line.includes('TAPE:')) {
-        status.tape = line.substring(5).trim().toLowerCase() === 'in';
-      }
-    }
-
-    return status;
+    // Send Sony VTR status command (adjust command as needed for your VTR protocol)
+    const statusCommand = Buffer.from([0x88, 0x01, 0x61, 0xFF]); // Example Sony protocol
+    const buffer = await sendCommand(path, statusCommand);
+    return parseStatusData(buffer);
   } catch (error) {
-    return {
-      timecode: '00:00:00:00',
-      mode: 'error',
-      speed: '0x',
-      tape: false,
-      error: `Parse error: ${error.message}`
-    };
+    throw new Error(`Failed to get VTR status: ${error.message}`);
+  }
+}
+
+/**
+ * Perform an autoscan of all known VTR port paths and return detected units.
+ * @returns {Promise<Array>} Array of detected VTR units
+ */
+async function autoScanVtrs() {
+  const results = [];
+  for (const path of VTR_PORTS) {
+    try {
+      const info = await getVtrStatus(path);
+      if (info && !info.error) {
+        results.push({ path, ...info });
+      }
+    } catch {
+      // port inactive or not a VTR - silently continue
+    }
+  }
+  return results;
+}
+
+/**
+ * Build a SerialPort object for Sony VTR communications.
+ * @param {string} path - Serial port path
+ * @returns {SerialPort} Configured SerialPort instance
+ */
+function openPort(path) {
+  return new SerialPort({
+    path,
+    baudRate: VTR_BAUD,
+    dataBits: 8,
+    stopBits: 1,
+    parity: 'none',
+    autoOpen: false
+  });
+}
+
+/**
+ * Turn raw status bits into a human-readable string.
+ * @param {Object} main - Main status object
+ * @param {Object} ext - Extended status object
+ * @returns {string} Human-readable status string
+ */
+function humanizeStatus(main, ext) {
+  const parts = [];
+  if (main.isRecording)      parts.push('REC');
+  else if (main.isPlaying)   parts.push('PLAY');
+  else                        parts.push('STOP');
+
+  if (main.isInEEMode)       parts.push('E-E');
+  if (ext && ext.hoursOperated) parts.push(`${ext.hoursOperated}h run`);
+
+  return parts.join(' • ');
+}
+
+/**
+ * Register a VTR port for real-time monitoring
+ * @param {string} id - Port identifier
+ * @param {SerialPort} port - SerialPort instance
+ */
+function registerPortForMonitoring(id, port) {
+  port.on('error', err => console.error(`VTR[${id}] serial error:`, err.message));
+  port.on('data', data => {
+    // Handle incoming unsolicited frames
+    try {
+      const status = parseStatusData(data);
+      console.log(`VTR[${id}] status update:`, humanizeStatus(status, {}));
+    } catch (error) {
+      console.debug(`VTR[${id}] parse error:`, error.message);
+    }
+  });
+}
+
+/**
+ * Register a VTR port by testing connection
+ * @param {string} path - Serial port path
+ * @returns {Promise<boolean>} Success status
+ * @throws {Error} If registration fails
+ */
+async function registerPort(path) {
+  if (!path || typeof path !== 'string') {
+    throw new Error('Invalid port path provided');
+  }
+
+  try {
+    // Test connection first
+    await getVtrStatus(path);
+    
+    // Add to registered ports (implement storage logic here)
+    console.log(`Port ${path} registered successfully`);
+    return true;
+  } catch (error) {
+    throw new Error(`Failed to register port ${path}: ${error.message}`);
   }
 }
 
@@ -287,7 +261,9 @@ module.exports = {
   getVtrStatus,
   openPort,
   sendCommand,
+  sendCommandBuffer,
   registerPort,
+  registerPortForMonitoring,
   humanizeStatus,
   VTR_PORTS,
   parseStatusData
