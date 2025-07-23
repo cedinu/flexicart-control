@@ -10,7 +10,7 @@ const WebSocket = require('ws');
 const vtrInterface = require('./commands/vtr_interface');
 const flexInterface = require('./commands/flexicart_interface');
 
-const CONFIG_PATH = path.join(__dirname, 'config', 'status.json');
+const CONFIG_PATH = path.join(__dirname, '..', 'config', 'status.json');
 const HTTP_PORT = process.env.PORT || 8080;
 const HTTPS_PORT = process.env.HTTPS_PORT || 8443;
 
