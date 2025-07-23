@@ -1,15 +1,39 @@
 const { autoScanVtrs, getVtrStatus, VTR_PORTS, humanizeStatus, sendCommand } = require('../src/commands/vtr_interface');
 
-// Sony VTR Control Commands
+// Sony VTR Control Commands - HDW Series Compatible
 const VTR_COMMANDS = {
-  PLAY: Buffer.from([0x88, 0x01, 0x2C, 0xFF]),
-  STOP: Buffer.from([0x88, 0x01, 0x20, 0xFF]),
-  PAUSE: Buffer.from([0x88, 0x01, 0x25, 0xFF]),
-  RECORD: Buffer.from([0x88, 0x01, 0x2F, 0xFF]),
-  FAST_FORWARD: Buffer.from([0x88, 0x01, 0x21, 0xFF]),
-  REWIND: Buffer.from([0x88, 0x01, 0x22, 0xFF]),
-  STATUS: Buffer.from([0x88, 0x01, 0x61, 0xFF]),
-  TIMECODE: Buffer.from([0x88, 0x01, 0x74, 0xFF])
+  // Transport Control Commands
+  PLAY: Buffer.from([0x88, 0x01, 0x2C, 0x01, 0xFF]),        // Play (corrected)
+  STOP: Buffer.from([0x88, 0x01, 0x20, 0x0F, 0xFF]),        // Stop (corrected)
+  PAUSE: Buffer.from([0x88, 0x01, 0x25, 0x11, 0xFF]),       // Pause/Still (corrected)
+  RECORD: Buffer.from([0x88, 0x01, 0x2F, 0x01, 0xFF]),      // Record (corrected)
+  FAST_FORWARD: Buffer.from([0x88, 0x01, 0x21, 0x0F, 0xFF]), // Fast Forward (corrected)
+  REWIND: Buffer.from([0x88, 0x01, 0x22, 0x0F, 0xFF]),      // Rewind (corrected)
+  
+  // Status and Information Commands
+  STATUS: Buffer.from([0x88, 0x01, 0x61, 0x20, 0xFF]),      // Device Status (corrected)
+  TIMECODE: Buffer.from([0x88, 0x01, 0x74, 0x20, 0xFF]),    // Current Time Sense (corrected)
+  
+  // Additional HDW-specific commands
+  EJECT: Buffer.from([0x88, 0x01, 0x2A, 0x05, 0xFF]),       // Eject
+  JOG_FORWARD: Buffer.from([0x88, 0x01, 0x21, 0x01, 0xFF]), // Jog Forward
+  JOG_REVERSE: Buffer.from([0x88, 0x01, 0x22, 0x01, 0xFF]), // Jog Reverse
+  SHUTTLE_PLUS_1: Buffer.from([0x88, 0x01, 0x21, 0x02, 0xFF]), // Shuttle +1x
+  SHUTTLE_MINUS_1: Buffer.from([0x88, 0x01, 0x22, 0x02, 0xFF]), // Shuttle -1x
+  
+  // Search Commands
+  CUE_UP_WITH_DATA: Buffer.from([0x88, 0x01, 0x24, 0x31, 0xFF]), // Cue up with data
+  SEARCH_PRESET: Buffer.from([0x88, 0x01, 0x30, 0x00, 0xFF]),    // Search preset
+  
+  // Status Request Commands  
+  LOCAL_DISABLE: Buffer.from([0x88, 0x01, 0x0C, 0x00, 0xFF]),    // Local disable
+  LOCAL_ENABLE: Buffer.from([0x88, 0x01, 0x0C, 0x01, 0xFF]),     // Local enable
+  DEVICE_TYPE: Buffer.from([0x88, 0x01, 0x00, 0x11, 0xFF]),      // Device type request
+  
+  // HDW Extended Status
+  EXTENDED_STATUS: Buffer.from([0x88, 0x01, 0x65, 0x20, 0xFF]),  // Extended device status
+  SIGNAL_CONTROL: Buffer.from([0x88, 0x01, 0x6A, 0x20, 0xFF]),   // Signal control status
+  TAPE_TIMER: Buffer.from([0x88, 0x01, 0x75, 0x20, 0xFF])        // Tape timer sense
 };
 
 /**
@@ -94,6 +118,72 @@ async function rewindVtr(path) {
 }
 
 /**
+ * HDW-specific command functions
+ */
+async function ejectTape(path) {
+  return await sendVtrCommand(path, VTR_COMMANDS.EJECT, 'EJECT');
+}
+
+async function jogForward(path) {
+  return await sendVtrCommand(path, VTR_COMMANDS.JOG_FORWARD, 'JOG FORWARD');
+}
+
+async function jogReverse(path) {
+  return await sendVtrCommand(path, VTR_COMMANDS.JOG_REVERSE, 'JOG REVERSE');
+}
+
+async function shuttlePlus1(path) {
+  return await sendVtrCommand(path, VTR_COMMANDS.SHUTTLE_PLUS_1, 'SHUTTLE +1x');
+}
+
+async function shuttleMinus1(path) {
+  return await sendVtrCommand(path, VTR_COMMANDS.SHUTTLE_MINUS_1, 'SHUTTLE -1x');
+}
+
+async function getExtendedStatus(path) {
+  console.log(`📊 Getting extended status from ${path}...`);
+  
+  try {
+    const response = await sendCommand(path, VTR_COMMANDS.EXTENDED_STATUS, 3000);
+    console.log(`📥 Extended Status Response: ${response.toString('hex')}`);
+    return response;
+  } catch (error) {
+    console.log(`❌ Extended status failed: ${error.message}`);
+    return null;
+  }
+}
+
+async function getDeviceType(path) {
+  console.log(`🔍 Getting device type from ${path}...`);
+  
+  try {
+    const response = await sendCommand(path, VTR_COMMANDS.DEVICE_TYPE, 3000);
+    console.log(`📥 Device Type Response: ${response.toString('hex')}`);
+    
+    // Parse device type response
+    if (response.length >= 4) {
+      const deviceId = response[3];
+      const deviceTypes = {
+        0x10: 'BVW series',
+        0x20: 'DVW series', 
+        0x30: 'HDW series',
+        0x40: 'J series',
+        0x50: 'MSW series'
+      };
+      
+      const deviceName = deviceTypes[deviceId] || `Unknown (0x${deviceId.toString(16)})`;
+      console.log(`📺 Device Type: ${deviceName}`);
+      return deviceName;
+    }
+    
+    return 'Unknown';
+  } catch (error) {
+    console.log(`❌ Device type check failed: ${error.message}`);
+    return null;
+  }
+}
+
+/**
  * Check status of a specific VTR port
  * @param {string} path - VTR port path
  */
@@ -163,14 +253,16 @@ async function scanAllVtrs() {
 }
 
 /**
- * Interactive VTR control menu
- * @param {string} path - VTR port path
+ * Enhanced control menu with HDW-specific commands
  */
 async function controlVtr(path) {
-  console.log(`\n🎮 VTR Control Panel - ${path}`);
-  console.log('================================');
+  console.log(`\n🎮 HDW VTR Control Panel - ${path}`);
+  console.log('=====================================');
   
-  // First check if VTR is responding
+  // First check device type
+  await getDeviceType(path);
+  
+  // Check if VTR is responding
   try {
     const status = await getVtrStatus(path);
     console.log(`📊 Current Status: ${status.mode.toUpperCase()} - TC: ${status.timecode} - Tape: ${status.tape ? 'IN' : 'OUT'}`);
@@ -179,18 +271,27 @@ async function controlVtr(path) {
     return;
   }
   
-  console.log('\nAvailable commands:');
+  console.log('\nTransport Commands:');
   console.log('  1. ▶️  Play');
   console.log('  2. ⏸️  Pause');
   console.log('  3. ⏹️  Stop');
   console.log('  4. ⏩ Fast Forward');
   console.log('  5. ⏪ Rewind');
   console.log('  6. 🔴 Record (CAUTION!)');
-  console.log('  7. 📊 Check Status');
-  console.log('  8. 🚪 Exit');
+  console.log('  7. ⏏️  Eject');
   
-  // Simple interactive menu (for demonstration)
-  // In a real application, you'd use a proper CLI library like inquirer
+  console.log('\nJog/Shuttle Commands:');
+  console.log('  8. 🔄 Jog Forward');
+  console.log('  9. 🔄 Jog Reverse');
+  console.log(' 10. 🎯 Shuttle +1x');
+  console.log(' 11. 🎯 Shuttle -1x');
+  
+  console.log('\nStatus Commands:');
+  console.log(' 12. 📊 Check Status');
+  console.log(' 13. 📈 Extended Status');
+  console.log(' 14. 🔍 Device Type');
+  console.log(' 15. 🚪 Exit');
+  
   const readline = require('readline');
   const rl = readline.createInterface({
     input: process.stdin,
@@ -198,52 +299,38 @@ async function controlVtr(path) {
   });
   
   const askCommand = () => {
-    rl.question('\nEnter command number (1-8): ', async (answer) => {
+    rl.question('\nEnter command number (1-15): ', async (answer) => {
       switch (answer.trim()) {
-        case '1':
-          await playVtr(path);
-          askCommand();
-          break;
-        case '2':
-          await pauseVtr(path);
-          askCommand();
-          break;
-        case '3':
-          await stopVtr(path);
-          askCommand();
-          break;
-        case '4':
-          await fastForwardVtr(path);
-          askCommand();
-          break;
-        case '5':
-          await rewindVtr(path);
-          askCommand();
-          break;
+        case '1': await playVtr(path); break;
+        case '2': await pauseVtr(path); break;
+        case '3': await stopVtr(path); break;
+        case '4': await fastForwardVtr(path); break;
+        case '5': await rewindVtr(path); break;
         case '6':
-          console.log('⚠️  Are you sure you want to record? This may overwrite existing content!');
+          console.log('⚠️  Are you sure you want to record?');
           rl.question('Type "YES" to confirm: ', async (confirm) => {
-            if (confirm === 'YES') {
-              await recordVtr(path);
-            } else {
-              console.log('❌ Record cancelled');
-            }
+            if (confirm === 'YES') await recordVtr(path);
+            else console.log('❌ Record cancelled');
             askCommand();
           });
-          break;
-        case '7':
-          await checkSingleVtr(path);
-          askCommand();
-          break;
-        case '8':
+          return;
+        case '7': await ejectTape(path); break;
+        case '8': await jogForward(path); break;
+        case '9': await jogReverse(path); break;
+        case '10': await shuttlePlus1(path); break;
+        case '11': await shuttleMinus1(path); break;
+        case '12': await checkSingleVtr(path); break;
+        case '13': await getExtendedStatus(path); break;
+        case '14': await getDeviceType(path); break;
+        case '15':
           console.log('👋 Exiting VTR control');
           rl.close();
-          break;
+          return;
         default:
-          console.log('❌ Invalid command. Please enter 1-8.');
-          askCommand();
+          console.log('❌ Invalid command. Please enter 1-15.');
           break;
       }
+      askCommand();
     });
   };
   
@@ -479,6 +566,13 @@ module.exports = {
   recordVtr,
   fastForwardVtr,
   rewindVtr,
+  ejectTape,
+  jogForward,
+  jogReverse,
+  shuttlePlus1,
+  shuttleMinus1,
+  getExtendedStatus,
+  getDeviceType,
   controlVtr,
   batchControlVtrs,
   sendVtrCommand,
