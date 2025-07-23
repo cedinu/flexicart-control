@@ -1202,6 +1202,8 @@ async function testAlternativeCommands(path) {
         if (response[0] === 0x10) { // ACK
           ackCommands.push(test.name);
           console.log(`   🎯 This command worked!`);
+        } else if (response[0] !== 0x11) {
+          console.log(`   📊 Different response - potential data!`);
         }
       } else {
         console.log(`   ⚠️  No response`);
@@ -1317,6 +1319,77 @@ function diagnoseMenuIssue() {
   console.log('   • Look for internal DIP switches');
   console.log('   • Some models have jumpers inside the unit');
   console.log('   • Contact Sony support with your exact VTR model');
+}
+
+// Add this function before the module.exports section
+
+/**
+ * Test commands with proper checksums
+ */
+async function testChecksumCommands(path) {
+  console.log(`🧮 Testing Sony commands with proper checksums on ${path}...`);
+  
+  const testCommands = [
+    { name: 'Device Type', cmd: VTR_COMMANDS_CORRECTED.DEVICE_TYPE },
+    { name: 'Status Simple', cmd: VTR_COMMANDS_CORRECTED.STATUS_SIMPLE },
+    { name: 'Status Extended', cmd: VTR_COMMANDS_CORRECTED.STATUS },
+    { name: 'Local Disable', cmd: VTR_COMMANDS_CORRECTED.LOCAL_DISABLE },
+    { name: 'Timecode', cmd: VTR_COMMANDS_CORRECTED.TIMECODE },
+    { name: 'Stop', cmd: VTR_COMMANDS_CORRECTED.STOP },
+    { name: 'Play', cmd: VTR_COMMANDS_CORRECTED.PLAY }
+  ];
+  
+  let workingCommands = 0;
+  let ackCommands = [];
+  
+  for (const test of testCommands) {
+    // Add safety check for undefined commands
+    if (!test.cmd) {
+      console.log(`\n❌ ${test.name} command is undefined - skipping`);
+      continue;
+    }
+    
+    console.log(`\n📡 Testing ${test.name}...`);
+    console.log(`   Command: ${test.cmd.toString('hex')}`);
+    console.log(`   Checksum valid: ${verifyChecksum(test.cmd) ? '✅' : '❌'}`);
+    
+    try {
+      const response = await sendCommand(path, test.cmd, 2000);
+      if (response && response.length > 0) {
+        console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        analyzeResponse(response, test.name);
+        
+        if (response[0] === 0x10) { // ACK
+          workingCommands++;
+          ackCommands.push(test.name);
+          console.log(`   🎯 SUCCESS! This command worked with proper checksum!`);
+        }
+      } else {
+        console.log(`   ⚠️  No response`);
+      }
+    } catch (error) {
+      console.log(`   ❌ Error: ${error.message}`);
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  
+  console.log(`\n📊 Checksum Test Results:`);
+  console.log(`   Commands tested: ${testCommands.length}`);
+  console.log(`   ACK responses: ${workingCommands}`);
+  
+  if (ackCommands.length > 0) {
+    console.log(`\n✅ Working commands with checksums:`);
+    ackCommands.forEach(cmd => console.log(`   - ${cmd}`));
+    console.log(`\n🎉 SUCCESS! Proper checksums fixed the communication!`);
+  } else {
+    console.log(`\n⚠️ Still no ACK responses. This suggests:`);
+    console.log(`   - VTR setup menu still has serial control disabled`);
+    console.log(`   - Different protocol variant needed`);
+    console.log(`   - Hardware/wiring issue`);
+  }
+  
+  return workingCommands > 0;
 }
 
 // Move the module.exports to the very end, after all function definitions
