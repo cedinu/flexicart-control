@@ -791,7 +791,7 @@ async function testChecksumCommands(path) {
     { name: 'Status Simple', cmd: VTR_COMMANDS_CORRECTED.STATUS_SIMPLE },
     { name: 'Status Extended', cmd: VTR_COMMANDS_CORRECTED.STATUS },
     { name: 'Local Disable', cmd: VTR_COMMANDS_CORRECTED.LOCAL_DISABLE },
-    { name: 'Timecode Simple', cmd: VTR_COMMANDS_CORRECTED.TIMECODE_SIMPLE },
+    { name: 'Timecode', cmd: VTR_COMMANDS_CORRECTED.TIMECODE }, // Fixed: removed _SIMPLE
     { name: 'Stop', cmd: VTR_COMMANDS_CORRECTED.STOP },
     { name: 'Play', cmd: VTR_COMMANDS_CORRECTED.PLAY }
   ];
@@ -800,6 +800,12 @@ async function testChecksumCommands(path) {
   let ackCommands = [];
   
   for (const test of testCommands) {
+    // Add safety check for undefined commands
+    if (!test.cmd) {
+      console.log(`\n❌ ${test.name} command is undefined - skipping`);
+      continue;
+    }
+    
     console.log(`\n📡 Testing ${test.name}...`);
     console.log(`   Command: ${test.cmd.toString('hex')}`);
     console.log(`   Checksum valid: ${verifyChecksum(test.cmd) ? '✅' : '❌'}`);
@@ -841,59 +847,6 @@ async function testChecksumCommands(path) {
   }
   
   return workingCommands > 0;
-}
-
-/**
- * Test extended status commands
- */
-async function testExtendedStatus(path) {
-  console.log(`📊 Testing extended status commands on ${path}...`);
-  
-  const extendedCommands = [
-    { name: 'Extended Status', cmd: createSonyCommand([0x01, 0x65, 0x20]) },
-    { name: 'Signal Control Status', cmd: createSonyCommand([0x01, 0x6A, 0x20]) },
-    { name: 'Tape Timer Status', cmd: createSonyCommand([0x01, 0x75, 0x20]) },
-    { name: 'Input/Output Status', cmd: createSonyCommand([0x01, 0x68, 0x20]) },
-    { name: 'Audio Status', cmd: createSonyCommand([0x01, 0x69, 0x20]) },
-    { name: 'Video Status', cmd: createSonyCommand([0x01, 0x67, 0x20]) },
-    { name: 'Machine Status', cmd: createSonyCommand([0x01, 0x66, 0x20]) }
-  ];
-  
-  for (const test of extendedCommands) {
-    console.log(`\n📡 Testing ${test.name}...`);
-    console.log(`   Command: ${test.cmd.toString('hex')}`);
-    console.log(`   Checksum valid: ${verifyChecksum(test.cmd) ? '✅' : '❌'}`);
-    
-    try {
-      const response = await sendCommand(path, test.cmd, 3000);
-      if (response && response.length > 0) {
-        console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
-        
-        if (response.length > 1) {
-          console.log(`   📊 Extended data received!`);
-          // Try to parse different parts of the response
-          for (let i = 0; i < response.length; i++) {
-            console.log(`     Byte ${i}: 0x${response[i].toString(16).padStart(2, '0')} (${response[i]})`);
-          }
-        }
-        
-        analyzeResponse(response, test.name);
-        
-        if (response[0] === 0x10) {
-          console.log(`   🎯 SUCCESS! ${test.name} returned ACK!`);
-          return true;
-        }
-      } else {
-        console.log(`   ⚠️  No response`);
-      }
-    } catch (error) {
-      console.log(`   ❌ Error: ${error.message}`);
-    }
-    
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  
-  return false;
 }
 
 // Update the interactiveCheck function to include extended status testing
