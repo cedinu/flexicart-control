@@ -1,7 +1,7 @@
 const { autoScanVtrs, getVtrStatus, VTR_PORTS, humanizeStatus, sendCommand } = require('../src/commands/vtr_interface');
 
 /**
- * Calculate Sony protocol checksum
+ * Calculate Sony protocol checksum - CORRECTED VERSION
  * @param {Buffer} commandBytes - Command bytes (excluding STX and ETX)
  * @returns {number} - Checksum byte
  */
@@ -14,7 +14,7 @@ function calculateChecksum(commandBytes) {
 }
 
 /**
- * Create Sony command with proper checksum
+ * Create Sony command with proper checksum - CORRECTED VERSION
  * @param {Array} cmdBytes - Array of command bytes [CMD1, CMD2, DATA1, DATA2, ...]
  * @returns {Buffer} - Complete command buffer with STX, checksum, and ETX
  */
@@ -24,7 +24,7 @@ function createSonyCommand(cmdBytes) {
 }
 
 /**
- * Verify if a command has correct checksum
+ * Verify if a command has correct checksum - CORRECTED VERSION
  * @param {Buffer} command - Complete command buffer
  * @returns {boolean} - True if checksum is correct
  */
@@ -35,6 +35,10 @@ function verifyChecksum(command) {
   const commandBytes = command.slice(1, -2); // Remove STX, checksum, and ETX
   const providedChecksum = command[command.length - 2];
   const calculatedChecksum = calculateChecksum(commandBytes);
+  
+  console.log(`   Debug: Command bytes: ${commandBytes.toString('hex')}`);
+  console.log(`   Debug: Provided checksum: 0x${providedChecksum.toString(16)}`);
+  console.log(`   Debug: Calculated checksum: 0x${calculatedChecksum.toString(16)}`);
   
   return providedChecksum === calculatedChecksum;
 }
