@@ -17,39 +17,39 @@ const statusPath = path.join(__dirname, '../config/status.json');
  * Scan for VTRs and Flexicarts, produce human-readable device entries
  */
 async function autoscanDevices() {
-  const rawVtrs = await vtrInterface.autoScanVtrs().catch(() => []);
+  // 1) only grab real ttyRP* files
+  const devFiles = await fs.promises.readdir('/dev');
+  const ports = devFiles
+    .filter(f => /^ttyRP([0-9]|1[0-5])$/.test(f))
+    .map(f => `/dev/${f}`);
 
-  let rawFlex = [];
-  if (typeof flexInterface.autoScanFlexicarts === 'function') {
-    rawFlex = await flexInterface.autoScanFlexicarts().catch(() => []);
-  } else if (typeof flexInterface.autoScan === 'function') {
-    rawFlex = await flexInterface.autoScan().catch(() => []);
+  console.log('Autoscan: probing', ports);
+
+  const results = await autoScanVtrs(ports);
+  // autoScanVtrs should take an array of paths and return only the ones that answered
+
+  if (results.length === 0) {
+    console.warn('No devices found during autoscan');
+  } else {
+    console.log('Found devices:', results.map(r => r.path));
   }
 
-  const vtrs = rawVtrs.map((v, idx) => ({
-    path:   v.port,
-    type:   'vtr',
-    model:  v.model || v.modelCode || 'unknown',
-    status: Array.isArray(v.transport) ? v.transport.join(' | ') : v.transport,
-    hours:  v.operationHours || 0,
-    channel: idx
-  }));
+  const out = {
+    timestamp: new Date().toISOString(),
+    devices: results.map(r => ({
+      path:   r.path,
+      model:  r.model,
+      status: r.status  // human-readable summary
+    }))
+  };
 
-  const flexs = rawFlex.map((f, idx) => ({
-    path:   f.port,
-    type:   'flexicart',
-    model:  f.model || 'unknown',
-    status: f.status || 'unknown',
-    uptime: f.uptime || 0,
-    channel: vtrs.length + idx
-  }));
+  await fs.promises.writeFile(
+    path.resolve(__dirname, '../config/status.json'),
+    JSON.stringify(out, null, 2)
+  );
 
-  const devices = [...vtrs, ...flexs];
-  const status = { timestamp: new Date().toISOString(), devices };
-
-  fs.writeFileSync(statusPath, JSON.stringify(status, null, 2));
-  console.log(`Autoscan: wrote ${devices.length} devices to ${statusPath}`);
-  return status;
+  console.log(`Autoscan: wrote ${results.length} devices to config/status.json`);
+  return results;
 }
 
 /**
