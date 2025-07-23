@@ -678,7 +678,7 @@ async function establishRemoteControl(path) {
     const statusResponse = await sendCommand(path, VTR_COMMANDS.STATUS, 3000);
     console.log(`📥 Status Response: ${statusResponse.toString('hex')}`);
     
-    if statusResponse[0] !== 0x11) {
+    if (statusResponse[0] !== 0x11) {
       console.log(`✅ Remote control established! VTR is now responding to commands.`);
       return true;
     } else {
