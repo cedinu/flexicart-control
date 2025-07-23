@@ -7,7 +7,10 @@
     "start": "NODE_ENV=production node src/index.js",
     "test": "jest",
     "vtr:scan": "node tests/check_vtr_status.js",
-    "vtr:check": "node tests/check_vtr_status.js",
+    "vtr:control": "node tests/check_vtr_status.js --control",
+    "vtr:play": "node tests/check_vtr_status.js --play",
+    "vtr:pause": "node tests/check_vtr_status.js --pause",
+    "vtr:stop": "node tests/check_vtr_status.js --stop",
     "vtr:monitor": "node tests/check_vtr_status.js --monitor",
     "vtr:test": "node tests/check_vtr_status.js --test"
   },
