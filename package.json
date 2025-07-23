@@ -5,7 +5,11 @@
   "scripts": {
     "dev": "NODE_ENV=development nodemon src/index.js",
     "start": "NODE_ENV=production node src/index.js",
-    "test": "jest"
+    "test": "jest",
+    "vtr:scan": "node tests/check_vtr_status.js",
+    "vtr:check": "node tests/check_vtr_status.js",
+    "vtr:monitor": "node tests/check_vtr_status.js --monitor",
+    "vtr:test": "node tests/check_vtr_status.js --test"
   },
   "dependencies": {
     "express": "^4.x",
