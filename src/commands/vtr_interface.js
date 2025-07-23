@@ -39,7 +39,7 @@ function sendCommand(port, commandBuffer) {
   });
 }
 
-export async function getVtrStatus(path) {
+async function getVtrStatus(path) {
   const port = openPort(path);
   // … use sendCommand(port, cmd) same as your test script …
   const main    = await sendCommand(port, Buffer.from([0x61, 0x20, 0x0F]));
@@ -56,7 +56,7 @@ export async function getVtrStatus(path) {
     status: humanizeStatus(status, ext)
   };
 
-export function humanizeStatus(main, ext) {
+function humanizeStatus(main, ext) {
   return [
     main.isPlaying       ? 'PLAY'  : main.isRecording ? 'REC'   : 'STOP',
     main.isInEEMode      ? 'E-E'   : '',
@@ -65,7 +65,7 @@ export function humanizeStatus(main, ext) {
   ].filter(Boolean).join(' • ');
 }
 
-export async function autoScanVtrs(portPaths) {
+async function autoScanVtrs(portPaths) {
   const results = [];
   for (const p of portPaths) {
     try {
@@ -78,7 +78,7 @@ export async function autoScanVtrs(portPaths) {
   return results;
 }
 
-export function openPort(path) {
+function openPort(path) {
   return new SerialPort({
     path,
     baudRate: 38400,  // from the Sony spec
@@ -105,5 +105,7 @@ function registerPort(id, port) {
 module.exports = {
   autoScanVtrs,
   getVtrStatus,
-  registerPort
+  registerPort,
+  openPort,
+  humanizeStatus
 };
