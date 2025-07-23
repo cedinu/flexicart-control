@@ -3,15 +3,57 @@
 // TODO: implement according to Sony 9-pin protocol
 
 /**
- * Parse the main STATUS DATA block (response to 61 20 0F)
- * @param {Buffer} buf  -- raw bytes of status data
- * @returns {Object}    -- minimal fields
+ * Parse VTR status data from buffer
+ * @param {Buffer} buffer - Raw status data from VTR
+ * @returns {Object} Parsed status object
  */
-function parseStatusData(buf) {
-  // For now, just return a placeholder transport status
-  return {
-    transport: 'unknown',
-  };
+function parseStatusData(buffer) {
+  if (!buffer || buffer.length === 0) {
+    return {
+      timecode: '00:00:00:00',
+      mode: 'stop',
+      speed: '1x',
+      tape: false,
+      error: 'No data received'
+    };
+  }
+
+  try {
+    // Convert buffer to string and parse
+    const data = buffer.toString('ascii').trim();
+    
+    // Example parsing logic - adjust based on actual VTR protocol
+    const lines = data.split('\n');
+    const status = {
+      timecode: '00:00:00:00',
+      mode: 'stop',
+      speed: '1x',
+      tape: false,
+      error: null
+    };
+
+    for (const line of lines) {
+      if (line.includes('TC:')) {
+        status.timecode = line.substring(3).trim();
+      } else if (line.includes('MODE:')) {
+        status.mode = line.substring(5).trim().toLowerCase();
+      } else if (line.includes('SPEED:')) {
+        status.speed = line.substring(6).trim();
+      } else if (line.includes('TAPE:')) {
+        status.tape = line.substring(5).trim().toLowerCase() === 'in';
+      }
+    }
+
+    return status;
+  } catch (error) {
+    return {
+      timecode: '00:00:00:00',
+      mode: 'error',
+      speed: '0x',
+      tape: false,
+      error: `Parse error: ${error.message}`
+    };
+  }
 }
 
 /**
