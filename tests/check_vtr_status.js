@@ -1365,3 +1365,93 @@ module.exports = {
 if (require.main === module) {
   interactiveCheck().catch(console.error);
 }
+
+/**
+ * Test extended status commands
+ */
+async function testExtendedStatus(path) {
+  console.log(`📊 Testing extended status commands on ${path}...`);
+  
+  const extendedCommands = [
+    { name: 'Extended Status', cmd: VTR_COMMANDS_CORRECTED.STATUS },
+    { name: 'Device Type', cmd: VTR_COMMANDS_CORRECTED.DEVICE_TYPE },
+    { name: 'Timecode', cmd: VTR_COMMANDS_CORRECTED.TIMECODE },
+    { name: 'Tape Timer', cmd: VTR_COMMANDS_CORRECTED.TAPE_TIMER },
+    
+    // Additional extended status commands with proper Sony format
+    { name: 'Signal Control Status', cmd: Buffer.from([0x6A, 0x20, 0x4A]) },
+    { name: 'Input/Output Status', cmd: Buffer.from([0x68, 0x20, 0x48]) },
+    { name: 'Audio Status', cmd: Buffer.from([0x69, 0x20, 0x49]) },
+    { name: 'Video Status', cmd: Buffer.from([0x67, 0x20, 0x47]) },
+    { name: 'Machine Status', cmd: Buffer.from([0x66, 0x20, 0x46]) },
+    { name: 'Timer Sense', cmd: Buffer.from([0x71, 0x20, 0x51]) },
+    { name: 'CTL Counter', cmd: Buffer.from([0x73, 0x20, 0x53]) }
+  ];
+  
+  let workingCommands = 0;
+  let dataResponses = [];
+  
+  for (const test of extendedCommands) {
+    if (!test.cmd) {
+      console.log(`\n❌ ${test.name} command is undefined - skipping`);
+      continue;
+    }
+    
+    console.log(`\n📡 Testing ${test.name}...`);
+    console.log(`   Command: ${test.cmd.toString('hex')}`);
+    console.log(`   Checksum valid: ${verifyChecksum(test.cmd) ? '✅' : '❌'}`);
+    
+    try {
+      const response = await sendCommand(path, test.cmd, 3000);
+      if (response && response.length > 0) {
+        console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        
+        if (response.length > 1) {
+          console.log(`   📊 Extended data received!`);
+          dataResponses.push({ name: test.name, response });
+          
+          // Try to parse different parts of the response
+          for (let i = 0; i < Math.min(response.length, 8); i++) {
+            console.log(`     Byte ${i}: 0x${response[i].toString(16).padStart(2, '0')} (${response[i]})`);
+          }
+        }
+        
+        analyzeResponse(response, test.name);
+        
+        if (response[0] === 0x10) {
+          console.log(`   🎯 SUCCESS! ${test.name} returned ACK!`);
+          workingCommands++;
+        }
+      } else {
+        console.log(`   ⚠️  No response`);
+      }
+    } catch (error) {
+      console.log(`   ❌ Error: ${error.message}`);
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  // Summary
+  console.log(`\n📊 Extended Status Test Results:`);
+  console.log(`   Commands tested: ${extendedCommands.length}`);
+  console.log(`   ACK responses: ${workingCommands}`);
+  console.log(`   Data responses: ${dataResponses.length}`);
+  
+  if (dataResponses.length > 0) {
+    console.log(`\n📈 Commands that returned data:`);
+    dataResponses.forEach(item => {
+      console.log(`   - ${item.name}: ${item.response.length} bytes`);
+    });
+  }
+  
+  if (workingCommands > 0) {
+    console.log(`\n✅ Some extended status commands worked!`);
+    console.log(`💡 This suggests the VTR is responding to certain command types.`);
+  } else {
+    console.log(`\n⚠️ No extended status commands returned ACK.`);
+    console.log(`💡 This confirms the VTR menu configuration issue.`);
+  }
+  
+  return workingCommands > 0;
+}
