@@ -1,9 +1,7 @@
 // src/commands/vtr_interface.js
-import { SerialPort } from 'serialport';
-import { parseStatusData, parseExtendedStatus } from './vtr_status_parser.js';
 
-//const { SerialPort } = require('serialport');
-//const { parseStatusData, parseExtendedStatus } = require('./vtr_status_parser');
+const { SerialPort } = require('serialport');
+const { parseStatusData, parseExtendedStatus } = require('./vtr_status_parser');
 
 const VTR_PORTS = Array.from({ length: 16 }, (_, i) => `/dev/ttyRP${i}`);
 const VTR_BAUD  = 38400;
