@@ -762,45 +762,28 @@ function showTroubleshootingGuide() {
 }
 
 /**
- * Test alternative command formats for compatibility
+ * Test commands with proper checksums
  */
-async function testAlternativeCommands(path) {
-  console.log(`🧪 Testing alternative command formats on ${path}...`);
+async function testChecksumCommands(path) {
+  console.log(`🧮 Testing Sony commands with proper checksums on ${path}...`);
   
-  const alternativeCommands = [
-    // Status commands with different formats
-    { name: 'Status (No Params)', cmd: Buffer.from([0x88, 0x01, 0x61, 0xFF]) },
-    { name: 'Status (Simple)', cmd: Buffer.from([0x88, 0x01, 0x61, 0x20, 0xFF]) },
-    { name: 'Status (Alt Format)', cmd: Buffer.from([0x88, 0x01, 0x60, 0xFF]) },
-    
-    // Device type variations
-    { name: 'Device Type (No Params)', cmd: Buffer.from([0x88, 0x01, 0x00, 0xFF]) },
-    { name: 'Device Type (Standard)', cmd: Buffer.from([0x88, 0x01, 0x00, 0x11, 0xFF]) },
-    
-    // Transport commands (basic format)
-    { name: 'Stop (Basic)', cmd: Buffer.from([0x88, 0x01, 0x20, 0xFF]) },
-    { name: 'Play (Basic)', cmd: Buffer.from([0x88, 0x01, 0x2C, 0xFF]) },
-    { name: 'Pause (Basic)', cmd: Buffer.from([0x88, 0x01, 0x25, 0xFF]) },
-    
-    // Timecode requests
-    { name: 'Timecode (Basic)', cmd: Buffer.from([0x88, 0x01, 0x74, 0xFF]) },
-    { name: 'Timecode (Standard)', cmd: Buffer.from([0x88, 0x01, 0x74, 0x20, 0xFF]) },
-    
-    // Local control variations
-    { name: 'Local Disable (Basic)', cmd: Buffer.from([0x88, 0x01, 0x0C, 0xFF]) },
-    { name: 'Local Disable (Standard)', cmd: Buffer.from([0x88, 0x01, 0x0C, 0x00, 0xFF]) },
-    
-    // Alternative status commands
-    { name: 'Timer Sense', cmd: Buffer.from([0x88, 0x01, 0x71, 0xFF]) },
-    { name: 'CTL Counter', cmd: Buffer.from([0x88, 0x01, 0x73, 0xFF]) }
+  const testCommands = [
+    { name: 'Device Type', cmd: VTR_COMMANDS_CORRECTED.DEVICE_TYPE },
+    { name: 'Status Simple', cmd: VTR_COMMANDS_CORRECTED.STATUS_SIMPLE },
+    { name: 'Status Extended', cmd: VTR_COMMANDS_CORRECTED.STATUS },
+    { name: 'Local Disable', cmd: VTR_COMMANDS_CORRECTED.LOCAL_DISABLE },
+    { name: 'Timecode Simple', cmd: VTR_COMMANDS_CORRECTED.TIMECODE_SIMPLE },
+    { name: 'Stop', cmd: VTR_COMMANDS_CORRECTED.STOP },
+    { name: 'Play', cmd: VTR_COMMANDS_CORRECTED.PLAY }
   ];
   
-  let workingCommands = [];
+  let workingCommands = 0;
   let ackCommands = [];
   
-  for (const test of alternativeCommands) {
+  for (const test of testCommands) {
     console.log(`\n📡 Testing ${test.name}...`);
     console.log(`   Command: ${test.cmd.toString('hex')}`);
+    console.log(`   Checksum valid: ${verifyChecksum(test.cmd) ? '✅' : '❌'}`);
     
     try {
       const response = await sendCommand(path, test.cmd, 2000);
@@ -808,11 +791,10 @@ async function testAlternativeCommands(path) {
         console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
         analyzeResponse(response, test.name);
         
-        workingCommands.push({ name: test.name, cmd: test.cmd, response });
-        
         if (response[0] === 0x10) { // ACK
+          workingCommands++;
           ackCommands.push(test.name);
-          console.log(`   🎯 This command worked!`);
+          console.log(`   🎯 SUCCESS! This command worked with proper checksum!`);
         }
       } else {
         console.log(`   ⚠️  No response`);
@@ -824,66 +806,22 @@ async function testAlternativeCommands(path) {
     await new Promise(resolve => setTimeout(resolve, 300));
   }
   
-  // Summary
-  console.log(`\n📊 Test Results Summary:`);
-  console.log(`   Total commands tested: ${alternativeCommands.length}`);
-  console.log(`   Commands with responses: ${workingCommands.length}`);
-  console.log(`   Commands with ACK: ${ackCommands.length}`);
+  console.log(`\n📊 Checksum Test Results:`);
+  console.log(`   Commands tested: ${testCommands.length}`);
+  console.log(`   ACK responses: ${workingCommands}`);
   
   if (ackCommands.length > 0) {
-    console.log(`\n✅ Working commands (ACK response):`);
+    console.log(`\n✅ Working commands with checksums:`);
     ackCommands.forEach(cmd => console.log(`   - ${cmd}`));
+    console.log(`\n🎉 SUCCESS! Proper checksums fixed the communication!`);
+  } else {
+    console.log(`\n⚠️ Still no ACK responses. This suggests:`);
+    console.log(`   - VTR setup menu still has serial control disabled`);
+    console.log(`   - Different protocol variant needed`);
+    console.log(`   - Hardware/wiring issue`);
   }
   
-  if (workingCommands.length > 0 && ackCommands.length === 0) {
-    console.log(`\n⚠️  All commands return NAK despite tape being loaded.`);
-    console.log(`💡 This suggests:`);
-    console.log(`   - VTR may still be in LOCAL mode (check REMOTE button)`);
-    console.log(`   - VTR setup menu may have serial control disabled`);
-    console.log(`   - Different VTR model requires different protocol`);
-    console.log(`   - VTR may be in a special mode (setup, diagnostics, etc.)`);
-  }
-  
-  return ackCommands.length > 0;
-}
-
-/**
- * VTR Menu Settings Helper
- */
-function showVtrMenuGuide() {
-  console.log('\n🔧 VTR Menu Settings Guide');
-  console.log('==========================');
-  console.log('\nSony VTR models often have menu settings that affect serial control:');
-  
-  console.log('\n📺 HDW Series:');
-  console.log('   • MENU → SETUP → REMOTE');
-  console.log('   • Set "9PIN REMOTE" to ON or ENABLE');
-  console.log('   • Check "REMOTE TYPE" setting');
-  console.log('   • Some models: "RS422 REMOTE" setting');
-  
-  console.log('\n📺 DVW Series:');
-  console.log('   • MENU → SETUP → INTERFACE');
-  console.log('   • Enable "REMOTE CONTROL"');
-  console.log('   • Set correct "REMOTE TYPE"');
-  
-  console.log('\n📺 BVW Series:');
-  console.log('   • Check front panel switches');
-  console.log('   • Some models have REMOTE/LOCAL switch');
-  console.log('   • Internal DIP switches may affect serial control');
-  
-  console.log('\n🎯 Common Settings to Check:');
-  console.log('   • Remote Control: ON/ENABLE');
-  console.log('   • Remote Type: RS422/9PIN/SERIAL');
-  console.log('   • Baud Rate: Usually 38400');
-  console.log('   • Protocol: Sony 9-pin or compatible');
-  console.log('   • Device ID: Usually 0 or 1');
-  
-  console.log('\n💡 If menu access is available:');
-  console.log('   1. Press MENU button on VTR');
-  console.log('   2. Navigate to SETUP or CONFIG');
-  console.log('   3. Look for REMOTE, INTERFACE, or COMMUNICATION settings');
-  console.log('   4. Enable serial/RS422 remote control');
-  console.log('   5. Save settings and power cycle VTR if needed');
+  return workingCommands > 0;
 }
 
 /**
@@ -899,6 +837,8 @@ async function interactiveCheck() {
     await scanAllVtrs();
   } else if (args[0] === '--help' || args[0] === '-h') {
     console.log('\nUsage:');
+    console.log('  node tests/check_vtr_status.js --menuissue           # Diagnose menu configuration issues');
+    console.log('  node tests/check_vtr_status.js --menuhelp            # Show VTR menu settings guide');
     console.log('  node tests/check_vtr_status.js                    # Scan all ports');
     console.log('  node tests/check_vtr_status.js /dev/ttyRP0        # Check specific port');
     console.log('  node tests/check_vtr_status.js --enhanced /dev/ttyRP0  # Enhanced check with diagnostics');
@@ -918,6 +858,9 @@ async function interactiveCheck() {
     console.log('  node tests/check_vtr_status.js --list             # List all possible ports');
     console.log('  node tests/check_vtr_status.js --monitor /dev/ttyRP0  # Monitor VTR');
     console.log('  node tests/check_vtr_status.js --test /dev/ttyRP0     # Test commands');
+    
+  } else if (args[0] === '--menuissue' || args[0] === '-mi') {
+    diagnoseMenuIssue();
     
   } else if (args[0] === '--checksum' || args[0] === '-cs') {
     const port = args[1];
