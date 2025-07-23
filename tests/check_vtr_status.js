@@ -731,7 +731,7 @@ function showTroubleshootingGuide() {
 }
 
 /**
- * Enhanced interactive checker with troubleshooting
+ * Enhanced interactive checker with no-tape testing
  */
 async function interactiveCheck() {
   const args = process.argv.slice(2);
@@ -748,6 +748,8 @@ async function interactiveCheck() {
     console.log('  node tests/check_vtr_status.js --enhanced /dev/ttyRP0  # Enhanced check with diagnostics');
     console.log('  node tests/check_vtr_status.js --diagnose /dev/ttyRP0  # Full diagnostic check');
     console.log('  node tests/check_vtr_status.js --remote /dev/ttyRP0    # Try to establish remote control');
+    console.log('  node tests/check_vtr_status.js --notape /dev/ttyRP0    # Test commands that work without tape');
+    console.log('  node tests/check_vtr_status.js --tapestatus /dev/ttyRP0 # Check if tape is loaded');
     console.log('  node tests/check_vtr_status.js --troubleshoot          # Show troubleshooting guide');
     console.log('  node tests/check_vtr_status.js --raw /dev/ttyRP0 "88 01 61 FF"  # Send raw hex command');
     console.log('  node tests/check_vtr_status.js --control /dev/ttyRP0  # Control VTR');
@@ -759,6 +761,22 @@ async function interactiveCheck() {
     console.log('  node tests/check_vtr_status.js --monitor /dev/ttyRP0  # Monitor VTR');
     console.log('  node tests/check_vtr_status.js --test /dev/ttyRP0     # Test commands');
     
+  } else if (args[0] === '--notape' || args[0] === '-nt') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --notape /dev/ttyRP0');
+      return;
+    }
+    await testNoTapeCommands(port);
+    
+  } else if (args[0] === '--tapestatus' || args[0] === '-ts') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --tapestatus /dev/ttyRP0');
+      return;
+    }
+    await checkTapeStatus(port);
+    
   } else if (args[0] === '--remote' || args[0] === '-rem') {
     const port = args[1];
     if (!port) {
@@ -767,7 +785,7 @@ async function interactiveCheck() {
     }
     await establishRemoteControl(port);
     
-  } else if (args[0] === '--troubleshoot' || args[0] === '-ts') {
+  } else if (args[0] === '--troubleshoot' || args[0] === '-tr') {
     showTroubleshootingGuide();
     
   } else if (args[0] === '--enhanced' || args[0] === '-e') {
@@ -894,6 +912,96 @@ async function monitorVtr(path, interval = 2000) {
 }
 
 /**
+ * Test commands that should work without tape loaded
+ */
+async function testNoTapeCommands(path) {
+  console.log(`🔧 Testing commands that work without tape on ${path}...`);
+  
+  const noTapeCommands = [
+    { name: 'Device Type Request', cmd: Buffer.from([0x88, 0x01, 0x00, 0x11, 0xFF]) },
+    { name: 'Status Request (Simple)', cmd: Buffer.from([0x88, 0x01, 0x61, 0xFF]) },
+    { name: 'Local Disable', cmd: Buffer.from([0x88, 0x01, 0x0C, 0x00, 0xFF]) },
+    { name: 'Timer Request', cmd: Buffer.from([0x88, 0x01, 0x71, 0x20, 0xFF]) },
+    { name: 'Signal Control Status', cmd: Buffer.from([0x88, 0x01, 0x6A, 0x20, 0xFF]) }
+  ];
+  
+  let workingCommands = 0;
+  
+  for (const test of noTapeCommands) {
+    console.log(`\n📡 Testing ${test.name}...`);
+    console.log(`   Command: ${test.cmd.toString('hex')}`);
+    
+    try {
+      const response = await sendCommand(path, test.cmd, 2000);
+      if (response && response.length > 0) {
+        console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        analyzeResponse(response, test.name);
+        
+        if (response[0] === 0x10) { // ACK
+          workingCommands++;
+        }
+      } else {
+        console.log(`   ⚠️  No response`);
+      }
+    } catch (error) {
+      console.log(`   ❌ Error: ${error.message}`);
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  
+  console.log(`\n📊 Summary: ${workingCommands}/${noTapeCommands.length} commands returned ACK`);
+  
+  if (workingCommands === 0) {
+    console.log('\n💡 Suggestions:');
+    console.log('   1. Load a tape cartridge into the VTR');
+    console.log('   2. Wait for tape to thread (10-30 seconds)');
+    console.log('   3. Check VTR display for tape presence indicator');
+    console.log('   4. Verify VTR is in REMOTE mode (not LOCAL)');
+    console.log('   5. Check VTR setup menu for serial control settings');
+  }
+  
+  return workingCommands > 0;
+}
+
+/**
+ * Check if tape is loaded and threaded
+ */
+async function checkTapeStatus(path) {
+  console.log(`📼 Checking tape status on ${path}...`);
+  
+  // Try to get tape timer/counter information
+  const tapeCommands = [
+    { name: 'Tape Timer', cmd: Buffer.from([0x88, 0x01, 0x75, 0x20, 0xFF]) },
+    { name: 'CTL Counter', cmd: Buffer.from([0x88, 0x01, 0x73, 0x20, 0xFF]) },
+    { name: 'UB Data', cmd: Buffer.from([0x88, 0x01, 0x78, 0x20, 0xFF]) }
+  ];
+  
+  for (const test of tapeCommands) {
+    try {
+      console.log(`\n📡 ${test.name}...`);
+      const response = await sendCommand(path, test.cmd, 2000);
+      
+      if (response && response.length > 0) {
+        console.log(`   Response: ${response.toString('hex')}`);
+        
+        if (response[0] === 0x10) {
+          console.log(`   ✅ Tape appears to be loaded and threaded`);
+          return true;
+        } else if (response[0] === 0x11) {
+          console.log(`   ⚠️  No tape or tape not threaded`);
+        }
+      }
+    } catch (error) {
+      console.log(`   ❌ ${test.name} failed: ${error.message}`);
+    }
+  }
+  
+  console.log('\n💡 Load a tape cartridge and wait for threading to complete');
+  return false;
+}
+
+/**
  * Main execution
  */
 if (require.main === module) {
@@ -920,6 +1028,8 @@ module.exports = {
   monitorVtr,
   testVtrCommands,
   testCommunication,
+  testNoTapeCommands,
+  checkTapeStatus,
   diagnosticCheck,
   establishRemoteControl,
   showTroubleshootingGuide,
