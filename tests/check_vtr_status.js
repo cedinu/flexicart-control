@@ -1199,7 +1199,7 @@ async function testAlternativeCommands(path) {
         
         workingCommands.push({ name: test.name, cmd: test.cmd, response });
         
-        if (response[0] === 0x10) { // ACK
+        if (response[0] === 0x10) {
           ackCommands.push(test.name);
           console.log(`   🎯 This command worked!`);
         } else if (response[0] !== 0x11) {
@@ -1403,6 +1403,7 @@ module.exports = {
   testNoTapeCommands,
   testAlternativeCommands,
   testChecksumCommands,
+  testModelVariants,
   testExtendedStatus,
   checkTapeStatus,
   diagnosticCheck,
