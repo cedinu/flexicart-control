@@ -855,8 +855,59 @@ async function testChecksumCommands(path) {
 }
 
 /**
- * Enhanced interactive checker with alternative testing
+ * Test extended status commands
  */
+async function testExtendedStatus(path) {
+  console.log(`📊 Testing extended status commands on ${path}...`);
+  
+  const extendedCommands = [
+    { name: 'Extended Status', cmd: createSonyCommand([0x01, 0x65, 0x20]) },
+    { name: 'Signal Control Status', cmd: createSonyCommand([0x01, 0x6A, 0x20]) },
+    { name: 'Tape Timer Status', cmd: createSonyCommand([0x01, 0x75, 0x20]) },
+    { name: 'Input/Output Status', cmd: createSonyCommand([0x01, 0x68, 0x20]) },
+    { name: 'Audio Status', cmd: createSonyCommand([0x01, 0x69, 0x20]) },
+    { name: 'Video Status', cmd: createSonyCommand([0x01, 0x67, 0x20]) },
+    { name: 'Machine Status', cmd: createSonyCommand([0x01, 0x66, 0x20]) }
+  ];
+  
+  for (const test of extendedCommands) {
+    console.log(`\n📡 Testing ${test.name}...`);
+    console.log(`   Command: ${test.cmd.toString('hex')}`);
+    console.log(`   Checksum valid: ${verifyChecksum(test.cmd) ? '✅' : '❌'}`);
+    
+    try {
+      const response = await sendCommand(path, test.cmd, 3000);
+      if (response && response.length > 0) {
+        console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        
+        if (response.length > 1) {
+          console.log(`   📊 Extended data received!`);
+          // Try to parse different parts of the response
+          for (let i = 0; i < response.length; i++) {
+            console.log(`     Byte ${i}: 0x${response[i].toString(16).padStart(2, '0')} (${response[i]})`);
+          }
+        }
+        
+        analyzeResponse(response, test.name);
+        
+        if (response[0] === 0x10) {
+          console.log(`   🎯 SUCCESS! ${test.name} returned ACK!`);
+          return true;
+        }
+      } else {
+        console.log(`   ⚠️  No response`);
+      }
+    } catch (error) {
+      console.log(`   ❌ Error: ${error.message}`);
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  return false;
+}
+
+// Update the interactiveCheck function to include extended status testing
 async function interactiveCheck() {
   const args = process.argv.slice(2);
   
@@ -867,8 +918,8 @@ async function interactiveCheck() {
     await scanAllVtrs();
   } else if (args[0] === '--help' || args[0] === '-h') {
     console.log('\nUsage:');
-    console.log('  node tests/check_vtr_status.js --menuissue           # Diagnose menu configuration issues');
-    console.log('  node tests/check_vtr_status.js --menuhelp            # Show VTR menu settings guide');
+    console.log('  node tests/check_vtr_status.js --extendedstatus /dev/ttyRP0  # Test extended status commands');
+    console.log('  node tests/check_vtr_status.js --checksum /dev/ttyRP0       # Test commands with proper checksums');
     console.log('  node tests/check_vtr_status.js                    # Scan all ports');
     console.log('  node tests/check_vtr_status.js /dev/ttyRP0        # Check specific port');
     console.log('  node tests/check_vtr_status.js --enhanced /dev/ttyRP0  # Enhanced check with diagnostics');
@@ -889,8 +940,13 @@ async function interactiveCheck() {
     console.log('  node tests/check_vtr_status.js --monitor /dev/ttyRP0  # Monitor VTR');
     console.log('  node tests/check_vtr_status.js --test /dev/ttyRP0     # Test commands');
     
-  } else if (args[0] === '--menuissue' || args[0] === '-mi') {
-    diagnoseMenuIssue();
+  } else if (args[0] === '--extendedstatus' || args[0] === '-ext') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --extendedstatus /dev/ttyRP0');
+      return;
+    }
+    await testExtendedStatus(port);
     
   } else if (args[0] === '--checksum' || args[0] === '-cs') {
     const port = args[1];
@@ -1331,6 +1387,7 @@ module.exports = {
   testNoTapeCommands,
   testAlternativeCommands,
   testChecksumCommands,
+  testExtendedStatus,
   checkTapeStatus,
   diagnosticCheck,
   establishRemoteControl,
@@ -1357,7 +1414,7 @@ module.exports = {
   batchControlVtrs,
   sendVtrCommand,
   analyzeResponse,
-  diagnoseMenuIssue, // Add this
+  diagnoseMenuIssue,
   VTR_COMMANDS,
   VTR_COMMANDS_CORRECTED
 };
