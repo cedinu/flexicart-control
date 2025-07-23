@@ -1,39 +1,70 @@
 const { autoScanVtrs, getVtrStatus, VTR_PORTS, humanizeStatus, sendCommand } = require('../src/commands/vtr_interface');
 
-// Sony VTR Control Commands - HDW Series Compatible
-const VTR_COMMANDS = {
-  // Transport Control Commands
-  PLAY: Buffer.from([0x88, 0x01, 0x2C, 0x01, 0xFF]),        // Play (corrected)
-  STOP: Buffer.from([0x88, 0x01, 0x20, 0x0F, 0xFF]),        // Stop (corrected)
-  PAUSE: Buffer.from([0x88, 0x01, 0x25, 0x11, 0xFF]),       // Pause/Still (corrected)
-  RECORD: Buffer.from([0x88, 0x01, 0x2F, 0x01, 0xFF]),      // Record (corrected)
-  FAST_FORWARD: Buffer.from([0x88, 0x01, 0x21, 0x0F, 0xFF]), // Fast Forward (corrected)
-  REWIND: Buffer.from([0x88, 0x01, 0x22, 0x0F, 0xFF]),      // Rewind (corrected)
+/**
+ * Calculate Sony protocol checksum
+ * @param {Buffer} commandBytes - Command bytes (excluding STX and ETX)
+ * @returns {number} - Checksum byte
+ */
+function calculateChecksum(commandBytes) {
+  let checksum = 0;
+  for (let i = 0; i < commandBytes.length; i++) {
+    checksum ^= commandBytes[i];
+  }
+  return checksum;
+}
+
+/**
+ * Create Sony command with proper checksum
+ * @param {Array} cmdBytes - Array of command bytes [CMD1, CMD2, DATA1, DATA2, ...]
+ * @returns {Buffer} - Complete command buffer with STX, checksum, and ETX
+ */
+function createSonyCommand(cmdBytes) {
+  const checksum = calculateChecksum(Buffer.from(cmdBytes));
+  return Buffer.from([0x88, ...cmdBytes, checksum, 0xFF]);
+}
+
+/**
+ * Verify if a command has correct checksum
+ * @param {Buffer} command - Complete command buffer
+ * @returns {boolean} - True if checksum is correct
+ */
+function verifyChecksum(command) {
+  if (command.length < 4) return false;
+  if (command[0] !== 0x88 || command[command.length - 1] !== 0xFF) return false;
   
-  // Status and Information Commands
-  STATUS: Buffer.from([0x88, 0x01, 0x61, 0x20, 0xFF]),      // Device Status (corrected)
-  TIMECODE: Buffer.from([0x88, 0x01, 0x74, 0x20, 0xFF]),    // Current Time Sense (corrected)
+  const commandBytes = command.slice(1, -2); // Remove STX, checksum, and ETX
+  const providedChecksum = command[command.length - 2];
+  const calculatedChecksum = calculateChecksum(commandBytes);
   
-  // Additional HDW-specific commands
-  EJECT: Buffer.from([0x88, 0x01, 0x2A, 0x05, 0xFF]),       // Eject
-  JOG_FORWARD: Buffer.from([0x88, 0x01, 0x21, 0x01, 0xFF]), // Jog Forward
-  JOG_REVERSE: Buffer.from([0x88, 0x01, 0x22, 0x01, 0xFF]), // Jog Reverse
-  SHUTTLE_PLUS_1: Buffer.from([0x88, 0x01, 0x21, 0x02, 0xFF]), // Shuttle +1x
-  SHUTTLE_MINUS_1: Buffer.from([0x88, 0x01, 0x22, 0x02, 0xFF]), // Shuttle -1x
+  return providedChecksum === calculatedChecksum;
+}
+
+// Updated VTR Commands with proper checksums
+const VTR_COMMANDS_CORRECTED = {
+  // Basic transport commands
+  PLAY: createSonyCommand([0x01, 0x2C, 0x01]),
+  STOP: createSonyCommand([0x01, 0x20, 0x0F]),
+  PAUSE: createSonyCommand([0x01, 0x25, 0x11]),
+  RECORD: createSonyCommand([0x01, 0x2F, 0x01]),
+  FAST_FORWARD: createSonyCommand([0x01, 0x21, 0x0F]),
+  REWIND: createSonyCommand([0x01, 0x22, 0x0F]),
   
-  // Search Commands
-  CUE_UP_WITH_DATA: Buffer.from([0x88, 0x01, 0x24, 0x31, 0xFF]), // Cue up with data
-  SEARCH_PRESET: Buffer.from([0x88, 0x01, 0x30, 0x00, 0xFF]),    // Search preset
+  // Status commands
+  STATUS: createSonyCommand([0x01, 0x61, 0x20]),
+  STATUS_SIMPLE: createSonyCommand([0x01, 0x61]),
+  TIMECODE: createSonyCommand([0x01, 0x74, 0x20]),
+  TIMECODE_SIMPLE: createSonyCommand([0x01, 0x74]),
   
-  // Status Request Commands  
-  LOCAL_DISABLE: Buffer.from([0x88, 0x01, 0x0C, 0x00, 0xFF]),    // Local disable
-  LOCAL_ENABLE: Buffer.from([0x88, 0x01, 0x0C, 0x01, 0xFF]),     // Local enable
-  DEVICE_TYPE: Buffer.from([0x88, 0x01, 0x00, 0x11, 0xFF]),      // Device type request
+  // Control commands
+  LOCAL_DISABLE: createSonyCommand([0x01, 0x0C, 0x00]),
+  LOCAL_ENABLE: createSonyCommand([0x01, 0x0C, 0x01]),
+  DEVICE_TYPE: createSonyCommand([0x01, 0x00, 0x11]),
   
-  // HDW Extended Status
-  EXTENDED_STATUS: Buffer.from([0x88, 0x01, 0x65, 0x20, 0xFF]),  // Extended device status
-  SIGNAL_CONTROL: Buffer.from([0x88, 0x01, 0x6A, 0x20, 0xFF]),   // Signal control status
-  TAPE_TIMER: Buffer.from([0x88, 0x01, 0x75, 0x20, 0xFF])        // Tape timer sense
+  // HDW-specific commands
+  EJECT: createSonyCommand([0x01, 0x2A, 0x05]),
+  EXTENDED_STATUS: createSonyCommand([0x01, 0x65, 0x20]),
+  SIGNAL_CONTROL: createSonyCommand([0x01, 0x6A, 0x20]),
+  TAPE_TIMER: createSonyCommand([0x01, 0x75, 0x20])
 };
 
 /**
@@ -888,6 +919,14 @@ async function interactiveCheck() {
     console.log('  node tests/check_vtr_status.js --monitor /dev/ttyRP0  # Monitor VTR');
     console.log('  node tests/check_vtr_status.js --test /dev/ttyRP0     # Test commands');
     
+  } else if (args[0] === '--checksum' || args[0] === '-cs') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --checksum /dev/ttyRP0');
+      return;
+    }
+    await testChecksumCommands(port);
+    
   } else if (args[0] === '--alternative' || args[0] === '-alt') {
     const port = args[1];
     if (!port) {
@@ -1168,12 +1207,16 @@ module.exports = {
   testCommunication,
   testNoTapeCommands,
   testAlternativeCommands,
+  testChecksumCommands,
   checkTapeStatus,
   diagnosticCheck,
   establishRemoteControl,
   showTroubleshootingGuide,
   showVtrMenuGuide,
   sendRawCommand,
+  calculateChecksum,
+  createSonyCommand,
+  verifyChecksum,
   playVtr,
   pauseVtr,
   stopVtr,
@@ -1191,7 +1234,8 @@ module.exports = {
   batchControlVtrs,
   sendVtrCommand,
   analyzeResponse,
-  VTR_COMMANDS
+  VTR_COMMANDS,
+  VTR_COMMANDS_CORRECTED
 };
 
 /**
@@ -1273,6 +1317,14 @@ async function interactiveCheck() {
     
   } else if (args[0] === '--menuissue' || args[0] === '-mi') {
     diagnoseMenuIssue();
+    
+  } else if (args[0] === '--checksum' || args[0] === '-cs') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --checksum /dev/ttyRP0');
+      return;
+    }
+    await testChecksumCommands(port);
     
   } else if (args[0] === '--alternative' || args[0] === '-alt') {
     const port = args[1];
