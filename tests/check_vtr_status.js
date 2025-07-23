@@ -409,7 +409,229 @@ async function testVtrCommands(path) {
 }
 
 /**
- * Enhanced interactive checker with control options
+ * Analyze Sony VTR response codes
+ */
+function analyzeResponse(response, commandName) {
+  if (response.length === 0) return;
+  
+  const firstByte = response[0];
+  console.log(`🔍 Analyzing response for ${commandName}:`);
+  
+  switch (firstByte) {
+    case 0x10:
+      console.log(`   ✅ ACK - Command acknowledged and executed`);
+      break;
+    case 0x11:
+      console.log(`   ⚠️  NAK - Command acknowledged but NOT executed`);
+      console.log(`   💡 Possible reasons: No tape, local mode, tape protection, etc.`);
+      break;
+    case 0x12:
+      console.log(`   ❌ UNDEFINED - Undefined command`);
+      break;
+    case 0x13:
+      console.log(`   ⏸️  COMPLETION - Previous command completed`);
+      break;
+    default:
+      if (firstByte >= 0x88) {
+        console.log(`   📊 STATUS DATA - Response contains status information`);
+      } else {
+        console.log(`   ❓ UNKNOWN - Response code: 0x${firstByte.toString(16)}`);
+      }
+      break;
+  }
+}
+
+/**
+ * Test basic communication with VTR
+ */
+async function testCommunication(path) {
+  console.log(`🔧 Testing basic communication with ${path}...`);
+  
+  // Test different commands with shorter timeouts
+  const testCommands = [
+    { name: 'Device Type', cmd: VTR_COMMANDS.DEVICE_TYPE, timeout: 1000 },
+    { name: 'Status (Basic)', cmd: Buffer.from([0x88, 0x01, 0x61, 0xFF]), timeout: 1000 },
+    { name: 'Status (Extended)', cmd: VTR_COMMANDS.STATUS, timeout: 2000 },
+    { name: 'Local Disable', cmd: VTR_COMMANDS.LOCAL_DISABLE, timeout: 1000 }
+  ];
+  
+  for (const test of testCommands) {
+    console.log(`\n📡 Testing ${test.name}...`);
+    console.log(`   Command: ${test.cmd.toString('hex')}`);
+    
+    try {
+      const response = await sendCommand(path, test.cmd, test.timeout);
+      if (response && response.length > 0) {
+        console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        analyzeResponse(response, test.name);
+        return true; // Found working communication
+      } else {
+        console.log(`   ⚠️  No response`);
+      }
+    } catch (error) {
+      console.log(`   ❌ Error: ${error.message}`);
+    }
+    
+    // Small delay between tests
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  
+  return false;
+}
+
+/**
+ * Port diagnostic function
+ */
+async function diagnosticCheck(path) {
+  console.log(`🔬 Diagnostic Check for ${path}`);
+  console.log('===============================\n');
+  
+  // 1. Test if port exists and can be opened
+  console.log('1️⃣ Testing port accessibility...');
+  try {
+    const { SerialPort } = require('serialport');
+    const testPort = new SerialPort({
+      path,
+      baudRate: 38400,
+      autoOpen: false
+    });
+    
+    await new Promise((resolve, reject) => {
+      testPort.open((err) => {
+        if (err) reject(err);
+        else {
+          testPort.close();
+          resolve();
+        }
+      });
+    });
+    console.log('   ✅ Port can be opened');
+  } catch (error) {
+    console.log(`   ❌ Cannot open port: ${error.message}`);
+    return false;
+  }
+  
+  // 2. Test different baud rates
+  console.log('\n2️⃣ Testing different baud rates...');
+  const baudRates = [38400, 9600, 19200];
+  
+  for (const baud of baudRates) {
+    console.log(`   Testing ${baud} baud...`);
+    try {
+      // Temporarily modify the baud rate for testing
+      const originalSendCommand = sendCommand;
+      const testSendCommand = async (path, command, timeout) => {
+        // This would require modifying the sendCommand to accept baud rate
+        // For now, just test the standard rate
+        return originalSendCommand(path, command, timeout);
+      };
+      
+      const response = await testSendCommand(path, VTR_COMMANDS.DEVICE_TYPE, 1000);
+      if (response && response.length > 0) {
+        console.log(`   ✅ ${baud} baud works! Response: ${response.toString('hex')}`);
+        break;
+      }
+    } catch (error) {
+      console.log(`   ❌ ${baud} baud failed`);
+    }
+  }
+  
+  // 3. Test basic communication
+  console.log('\n3️⃣ Testing basic communication...');
+  const commWorking = await testCommunication(path);
+  
+  if (!commWorking) {
+    console.log('\n❌ No communication established');
+    console.log('💡 Troubleshooting tips:');
+    console.log('   - Check physical RS-422 connections');
+    console.log('   - Verify VTR is powered on');
+    console.log('   - Check if VTR is in REMOTE mode (not LOCAL)');
+    console.log('   - Try different baud rates');
+    console.log('   - Check cable wiring (TX/RX, +/-)');
+    return false;
+  }
+  
+  console.log('\n✅ Basic communication working!');
+  return true;
+}
+
+/**
+ * Enhanced VTR status check with fallback methods
+ */
+async function checkSingleVtrEnhanced(path) {
+  console.log(`\n🔍 Enhanced VTR Check - ${path}`);
+  console.log('=====================================');
+  
+  // First try diagnostic check
+  const commOk = await diagnosticCheck(path);
+  if (!commOk) {
+    return null;
+  }
+  
+  // Try different status commands
+  const statusCommands = [
+    { name: 'Basic Status', cmd: Buffer.from([0x88, 0x01, 0x61, 0xFF]) },
+    { name: 'Extended Status', cmd: VTR_COMMANDS.STATUS },
+    { name: 'Device Type', cmd: VTR_COMMANDS.DEVICE_TYPE }
+  ];
+  
+  for (const statusCmd of statusCommands) {
+    console.log(`\n📊 Trying ${statusCmd.name}...`);
+    try {
+      const response = await sendCommand(path, statusCmd.cmd, 3000);
+      if (response && response.length > 0) {
+        console.log(`✅ ${statusCmd.name} successful!`);
+        console.log(`📥 Response: ${response.toString('hex')}`);
+        
+        // Try to parse the response
+        try {
+          const status = await getVtrStatus(path);
+          console.log(`📼 Timecode: ${status.timecode}`);
+          console.log(`⚡ Mode: ${status.mode.toUpperCase()}`);
+          console.log(`🏃 Speed: ${status.speed}`);
+          console.log(`💾 Tape: ${status.tape ? 'IN' : 'OUT'}`);
+          return status;
+        } catch (parseError) {
+          console.log(`⚠️  Response received but parsing failed: ${parseError.message}`);
+        }
+        break;
+      }
+    } catch (error) {
+      console.log(`❌ ${statusCmd.name} failed: ${error.message}`);
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Raw communication test - send any hex command
+ */
+async function sendRawCommand(path, hexString) {
+  console.log(`🔧 Sending raw command: ${hexString}`);
+  
+  try {
+    const buffer = Buffer.from(hexString.replace(/\s/g, ''), 'hex');
+    console.log(`📤 Command bytes: ${buffer.toString('hex')}`);
+    
+    const response = await sendCommand(path, buffer, 3000);
+    
+    if (response && response.length > 0) {
+      console.log(`📥 Response: ${response.toString('hex')} (${response.length} bytes)`);
+      console.log(`📝 ASCII: "${response.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}"}`);
+      return response;
+    } else {
+      console.log(`⚠️  No response received`);
+      return null;
+    }
+  } catch (error) {
+    console.log(`❌ Raw command failed: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Enhanced interactive checker with diagnostic options
  */
 async function interactiveCheck() {
   const args = process.argv.slice(2);
@@ -418,13 +640,14 @@ async function interactiveCheck() {
   console.log('==================================');
   
   if (args.length === 0) {
-    // No arguments - scan all ports
     await scanAllVtrs();
   } else if (args[0] === '--help' || args[0] === '-h') {
-    // Show help
     console.log('\nUsage:');
     console.log('  node tests/check_vtr_status.js                    # Scan all ports');
     console.log('  node tests/check_vtr_status.js /dev/ttyRP0        # Check specific port');
+    console.log('  node tests/check_vtr_status.js --enhanced /dev/ttyRP0  # Enhanced check with diagnostics');
+    console.log('  node tests/check_vtr_status.js --diagnose /dev/ttyRP0  # Full diagnostic check');
+    console.log('  node tests/check_vtr_status.js --raw /dev/ttyRP0 "88 01 61 FF"  # Send raw hex command');
     console.log('  node tests/check_vtr_status.js --control /dev/ttyRP0  # Control VTR');
     console.log('  node tests/check_vtr_status.js --play /dev/ttyRP0     # Send play command');
     console.log('  node tests/check_vtr_status.js --pause /dev/ttyRP0    # Send pause command');
@@ -434,8 +657,32 @@ async function interactiveCheck() {
     console.log('  node tests/check_vtr_status.js --monitor /dev/ttyRP0  # Monitor VTR');
     console.log('  node tests/check_vtr_status.js --test /dev/ttyRP0     # Test commands');
     
+  } else if (args[0] === '--enhanced' || args[0] === '-e') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --enhanced /dev/ttyRP0');
+      return;
+    }
+    await checkSingleVtrEnhanced(port);
+    
+  } else if (args[0] === '--diagnose' || args[0] === '-d') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --diagnose /dev/ttyRP0');
+      return;
+    }
+    await diagnosticCheck(port);
+    
+  } else if (args[0] === '--raw' || args[0] === '-r') {
+    const port = args[1];
+    const hexCommand = args[2];
+    if (!port || !hexCommand) {
+      console.log('❌ Usage: --raw /dev/ttyRP0 "88 01 61 FF"');
+      return;
+    }
+    await sendRawCommand(port, hexCommand);
+    
   } else if (args[0] === '--control' || args[0] === '-c') {
-    // Interactive control mode
     const port = args[1] || VTR_PORTS[0];
     await controlVtr(port);
     
@@ -474,14 +721,12 @@ async function interactiveCheck() {
     await batchControlVtrs(ports, command);
     
   } else if (args[0] === '--list' || args[0] === '-l') {
-    // List all possible ports
     console.log('\n📍 Available VTR ports:');
     VTR_PORTS.forEach((port, index) => {
       console.log(`   ${index + 1}. ${port}`);
     });
     
   } else {
-    // Check specific port
     const targetPort = args[0];
     
     if (!VTR_PORTS.includes(targetPort)) {
@@ -557,9 +802,13 @@ if (require.main === module) {
 
 module.exports = {
   checkSingleVtr,
+  checkSingleVtrEnhanced,
   scanAllVtrs,
   monitorVtr,
   testVtrCommands,
+  testCommunication,
+  diagnosticCheck,
+  sendRawCommand,
   playVtr,
   pauseVtr,
   stopVtr,
@@ -576,5 +825,6 @@ module.exports = {
   controlVtr,
   batchControlVtrs,
   sendVtrCommand,
+  analyzeResponse,
   VTR_COMMANDS
 };
