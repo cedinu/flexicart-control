@@ -1361,3 +1361,8 @@ module.exports = {
   VTR_COMMANDS,
   VTR_COMMANDS_CORRECTED
 };
+
+// Add this at the very end of the file, after module.exports
+if (require.main === module) {
+  interactiveCheck().catch(console.error);
+}
