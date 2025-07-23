@@ -102,7 +102,7 @@ async function sendCommand(path, command, timeout = 5000) {
         baudRate: VTR_BAUD,
         dataBits: 8,
         stopBits: 1,
-        parity: 'none',
+        parity: 'odd',
         autoOpen: false
       });
 

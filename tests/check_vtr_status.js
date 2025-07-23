@@ -73,32 +73,28 @@ const VTR_COMMANDS = {
   SHUTTLE_MINUS_1: Buffer.from([0x88, 0x01, 0x34, 0x01, 0xFF])
 };
 
-// Updated VTR Commands with proper checksums
+// Corrected VTR Commands - Sony 9-pin protocol (simple format, no STX/ETX)
 const VTR_COMMANDS_CORRECTED = {
-  // Basic transport commands
-  PLAY: createSonyCommand([0x01, 0x2C, 0x01]),
-  STOP: createSonyCommand([0x01, 0x20, 0x0F]),
-  PAUSE: createSonyCommand([0x01, 0x25, 0x11]),
-  RECORD: createSonyCommand([0x01, 0x2F, 0x01]),
-  FAST_FORWARD: createSonyCommand([0x01, 0x21, 0x0F]),
-  REWIND: createSonyCommand([0x01, 0x22, 0x0F]),
+  // Transport commands (CMD1, CMD2, CHECKSUM)
+  PLAY: Buffer.from([0x20, 0x00, 0x20]),           // PLAY with checksum
+  STOP: Buffer.from([0x20, 0x0F, 0x2F]),           // STOP with checksum  
+  PAUSE: Buffer.from([0x20, 0x01, 0x21]),          // PAUSE with checksum
+  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // FF with checksum
+  REWIND: Buffer.from([0x20, 0x20, 0x00]),         // REW with checksum
+  RECORD: Buffer.from([0x20, 0x02, 0x22]),         // RECORD with checksum
   
-  // Status commands
-  STATUS: createSonyCommand([0x01, 0x61, 0x20]),
-  STATUS_SIMPLE: createSonyCommand([0x01, 0x61]),
-  TIMECODE: createSonyCommand([0x01, 0x74, 0x20]),
-  TIMECODE_SIMPLE: createSonyCommand([0x01, 0x74]),
+  // Status commands  
+  STATUS: Buffer.from([0x61, 0x20, 0x41]),         // Status with data request
+  STATUS_SIMPLE: Buffer.from([0x61, 0x61]),        // Simple status
+  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // Device type request
   
   // Control commands
-  LOCAL_DISABLE: createSonyCommand([0x01, 0x0C, 0x00]),
-  LOCAL_ENABLE: createSonyCommand([0x01, 0x0C, 0x01]),
-  DEVICE_TYPE: createSonyCommand([0x01, 0x00, 0x11]),
+  LOCAL_DISABLE: Buffer.from([0x0C, 0x00, 0x0C]),  // Local disable
+  LOCAL_ENABLE: Buffer.from([0x0C, 0x01, 0x0D]),   // Local enable
   
-  // HDW-specific commands
-  EJECT: createSonyCommand([0x01, 0x2A, 0x05]),
-  EXTENDED_STATUS: createSonyCommand([0x01, 0x65, 0x20]),
-  SIGNAL_CONTROL: createSonyCommand([0x01, 0x6A, 0x20]),
-  TAPE_TIMER: createSonyCommand([0x01, 0x75, 0x20])
+  // Timer commands
+  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // Timecode request
+  TAPE_TIMER: Buffer.from([0x75, 0x20, 0x55])      // Tape timer
 };
 
 /**
