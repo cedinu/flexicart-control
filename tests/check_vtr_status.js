@@ -64,7 +64,7 @@ const VTR_COMMANDS = {
 
 // Corrected VTR Commands - Sony 9-pin protocol (simple format, no STX/ETX)
 const VTR_COMMANDS_CORRECTED = {
-  // Transport commands (CMD1, CMD2, CHECKSUM)
+  // Transport commands (correct Sony 9-pin format)
   PLAY: Buffer.from([0x20, 0x00, 0x20]),           // PLAY with checksum
   STOP: Buffer.from([0x20, 0x0F, 0x2F]),           // STOP with checksum  
   PAUSE: Buffer.from([0x20, 0x01, 0x21]),          // PAUSE with checksum
