@@ -1042,6 +1042,13 @@ async function interactiveCheck() {
       console.log(`   ${index + 1}. ${port}`);
     });
     
+  } else if (args[0] === '--formats' || args[0] === '-fmt') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --formats /dev/ttyRP0');
+      return;
+    }
+    await testCommandFormats(port);
   } else {
     const targetPort = args[0];
     
@@ -1396,6 +1403,59 @@ function diagnoseMenuIssue() {
   console.log('\n💡 This will change NAK responses to ACK responses.');
 }
 
+/**
+ * Test multiple command formats side by side
+ */
+async function testCommandFormats(path) {
+  console.log(`🔀 Testing different command formats on ${path}...`);
+  
+  const commandTests = [
+    {
+      name: 'PLAY Commands',
+      commands: [
+        { format: 'Original STX/ETX', cmd: Buffer.from([0x88, 0x01, 0x20, 0x00, 0xFF]) },
+        { format: 'Simple with checksum', cmd: Buffer.from([0x20, 0x00, 0x20]) },
+        { format: 'Just command bytes', cmd: Buffer.from([0x20, 0x00]) },
+        { format: 'Single byte', cmd: Buffer.from([0x20]) }
+      ]
+    },
+    {
+      name: 'STATUS Commands',
+      commands: [
+        { format: 'Original STX/ETX', cmd: Buffer.from([0x88, 0x01, 0x61, 0x20, 0xFF]) },
+        { format: 'Simple with checksum', cmd: Buffer.from([0x61, 0x20, 0x41]) },
+        { format: 'Simple status', cmd: Buffer.from([0x61, 0x61]) },
+        { format: 'Just command byte', cmd: Buffer.from([0x61]) }
+      ]
+    }
+  ];
+  
+  for (const test of commandTests) {
+    console.log(`\n🎯 Testing ${test.name}:`);
+    console.log('='.repeat(50));
+    
+    for (const cmd of test.commands) {
+      console.log(`\n📡 Format: ${cmd.format}`);
+      console.log(`   Command: ${cmd.cmd.toString('hex')}`);
+      console.log(`   Length: ${cmd.cmd.length} bytes`);
+      
+      try {
+        const response = await sendCommand(path, cmd.cmd, 2000);
+        if (response && response.length > 0) {
+          console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+          analyzeResponse(response, cmd.format);
+        } else {
+          console.log(`   ⚠️  No response`);
+        }
+      } catch (error) {
+        console.log(`   ❌ Error: ${error.message}`);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+}
+
 // Call the main function if this file is run directly
 if (require.main === module) {
   interactiveCheck().catch(error => {
@@ -1445,5 +1505,6 @@ module.exports = {
   diagnoseMenuIssue,
   testModelVariants,
   VTR_COMMANDS,
-  VTR_COMMANDS_CORRECTED
+  VTR_COMMANDS_CORRECTED,
+  testCommandFormats
 };
