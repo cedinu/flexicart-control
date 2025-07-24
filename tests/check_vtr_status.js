@@ -459,44 +459,62 @@ async function testVtrCommands(path) {
 }
 
 /**
- * Analyze Sony VTR response codes - CORRECTED VERSION
+ * Enhanced response analysis with detailed byte breakdown
  */
 function analyzeResponse(response, commandName) {
-  if (response.length === 0) return;
+  if (!response || response.length === 0) {
+    console.log(`🔍 No response to analyze for ${commandName}`);
+    return;
+  }
   
   console.log(`🔍 Analyzing response for ${commandName}:`);
+  console.log(`   📊 Length: ${response.length} bytes`);
+  console.log(`   📊 Hex: ${response.toString('hex')}`);
+  console.log(`   📊 Bytes: [${Array.from(response).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
+  console.log(`   📊 Decimal: [${Array.from(response).join(', ')}]`);
+  console.log(`   📊 Binary: ${Array.from(response).map(b => b.toString(2).padStart(8, '0')).join(' ')}`);
   
-  if (response.length >= 2) {
-    const responseCode = (response[0] << 8) | response[1]; // Combine first two bytes
+  if (response.length >= 1) {
     const firstByte = response[0];
-    const secondByte = response[1];
+    console.log(`   🔸 First byte: 0x${firstByte.toString(16).padStart(2, '0')} (${firstByte})`);
     
-    console.log(`   Response bytes: ${response[0].toString(16).padStart(2, '0')} ${response[1].toString(16).padStart(2, '0')}`);
-    
-    if (firstByte === 0x10 && secondByte === 0x01) {
-      console.log(`   ✅ ACK (10 01) - Command acknowledged and executed successfully!`);
-    } else if (firstByte === 0x11 && secondByte === 0x12) {
-      console.log(`   ⚠️  NAK (11 12) - Command acknowledged but NOT executed`);
-      console.log(`   💡 Possible reasons: No tape, local mode, tape protection, etc.`);
-    } else if (firstByte === 0x11 && secondByte === 0x11) {
-      console.log(`   ❌ UNDEFINED (11 11) - Undefined command or parameter error`);
-    } else if (firstByte === 0x10 && secondByte === 0x13) {
-      console.log(`   ⏸️  COMPLETION (10 13) - Previous command completed`);
-    } else if (firstByte >= 0x80) {
-      console.log(`   📊 STATUS DATA - Response contains status information`);
-      console.log(`   📈 Data length: ${response.length} bytes`);
+    if (response.length >= 2) {
+      const secondByte = response[1];
+      console.log(`   🔸 Second byte: 0x${secondByte.toString(16).padStart(2, '0')} (${secondByte})`);
+      
+      // Sony 9-pin response analysis
+      if (firstByte === 0x10 && secondByte === 0x01) {
+        console.log(`   ✅ ACK (10 01) - Command acknowledged and executed successfully!`);
+      } else if (firstByte === 0x11 && secondByte === 0x12) {
+        console.log(`   ⚠️  NAK (11 12) - Command acknowledged but NOT executed`);
+      } else if (firstByte === 0x11 && secondByte === 0x11) {
+        console.log(`   ❌ UNDEFINED (11 11) - Undefined command or parameter error`);
+      } else if (firstByte === 0x10 && secondByte === 0x13) {
+        console.log(`   ⏸️  COMPLETION (10 13) - Previous command completed`);
+      } else if (firstByte >= 0x80) {
+        console.log(`   📊 STATUS DATA - Response contains status information`);
+      } else {
+        console.log(`   ❓ UNKNOWN two-byte response`);
+      }
     } else {
-      console.log(`   ❓ UNKNOWN - Response code: ${firstByte.toString(16)} ${secondByte.toString(16)}`);
+      // Single byte analysis
+      if (firstByte === 0x10) {
+        console.log(`   🔶 Partial ACK? (incomplete response)`);
+      } else if (firstByte === 0x11) {
+        console.log(`   🔶 Partial NAK? (incomplete response)`);
+      } else if (firstByte >= 0x80) {
+        console.log(`   🔶 Possible status data (incomplete)`);
+      } else {
+        console.log(`   ❓ Unknown single byte response`);
+      }
     }
-  } else {
-    // Single byte response (unusual)
-    const firstByte = response[0];
-    console.log(`   Single byte response: 0x${firstByte.toString(16)}`);
-    
-    if (firstByte === 0x11) {
-      console.log(`   ⚠️  Partial NAK - May be incomplete response`);
-    } else {
-      console.log(`   ❓ Unknown single byte response`);
+  }
+  
+  // Show all bytes if response is longer
+  if (response.length > 2) {
+    console.log(`   📈 Additional bytes:`);
+    for (let i = 2; i < response.length; i++) {
+      console.log(`     Byte ${i}: 0x${response[i].toString(16).padStart(2, '0')} (${response[i]})`);
     }
   }
 }
@@ -665,7 +683,7 @@ async function checkSingleVtrEnhanced(path) {
 }
 
 /**
- * Raw communication test - send any hex command
+ * Raw communication test - send any hex command with detailed logging
  */
 async function sendRawCommand(path, hexString) {
   console.log(`🔧 Sending raw command: ${hexString}`);
@@ -673,12 +691,20 @@ async function sendRawCommand(path, hexString) {
   try {
     const buffer = Buffer.from(hexString.replace(/\s/g, ''), 'hex');
     console.log(`📤 Command bytes: ${buffer.toString('hex')}`);
+    console.log(`📤 Command length: ${buffer.length} bytes`);
+    console.log(`📤 Individual bytes: [${Array.from(buffer).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
     
     const response = await sendCommand(path, buffer, 3000);
     
     if (response && response.length > 0) {
       console.log(`📥 Response: ${response.toString('hex')} (${response.length} bytes)`);
-      console.log(`📝 ASCII: "${response.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}"}`);
+      console.log(`📥 Individual bytes: [${Array.from(response).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
+      console.log(`📥 ASCII: "${response.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}"}`);
+      console.log(`📥 Binary: ${Array.from(response).map(b => b.toString(2).padStart(8, '0')).join(' ')}`);
+      
+      // Analyze the response
+      analyzeResponse(response, 'Raw Command');
+      
       return response;
     } else {
       console.log(`⚠️  No response received`);
