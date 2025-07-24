@@ -1070,6 +1070,15 @@ async function interactiveCheck() {
       return;
     }
     await testCommandFormats(port);
+    
+  } else if (args[0] === '--simple' || args[0] === '-s') {
+    const port = args[1];
+    if (!port) {
+      console.log('❌ Please specify a port: --simple /dev/ttyRP0');
+      return;
+    }
+    await testSimpleCommands(port);
+    
   } else {
     const targetPort = args[0];
     
@@ -1478,6 +1487,81 @@ async function testCommandFormats(path) {
       await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
+}
+
+/**
+ * Test simple commands without STX/ETX framing
+ */
+async function testSimpleCommands(path) {
+  console.log(`🎯 Testing simple commands without STX/ETX on ${path}...`);
+  
+  const simpleTests = [
+    // Single byte commands
+    { name: 'PLAY (single)', cmd: VTR_COMMANDS_SIMPLE.PLAY },
+    { name: 'STOP (single)', cmd: VTR_COMMANDS_SIMPLE.STOP },
+    { name: 'STATUS (single)', cmd: VTR_COMMANDS_SIMPLE.STATUS },
+    { name: 'DEVICE TYPE (single)', cmd: VTR_COMMANDS_SIMPLE.DEVICE_TYPE },
+    { name: 'LOCAL DISABLE (single)', cmd: VTR_COMMANDS_SIMPLE.LOCAL_DISABLE },
+    
+    // Two byte commands
+    { name: 'PLAY with param', cmd: VTR_COMMANDS_SIMPLE.PLAY_PARAM },
+    { name: 'STATUS with param', cmd: VTR_COMMANDS_SIMPLE.STATUS_PARAM },
+    { name: 'DEVICE with param', cmd: VTR_COMMANDS_SIMPLE.DEVICE_PARAM },
+    
+    // Three byte commands with checksum
+    { name: 'PLAY with checksum', cmd: VTR_COMMANDS_SIMPLE.PLAY_CHECKSUM },
+    { name: 'STATUS with checksum', cmd: VTR_COMMANDS_SIMPLE.STATUS_CHECKSUM },
+    { name: 'DEVICE with checksum', cmd: VTR_COMMANDS_SIMPLE.DEVICE_CHECKSUM }
+  ];
+  
+  let workingCommands = 0;
+  let successfulCommands = [];
+  
+  for (const test of simpleTests) {
+    console.log(`\n📡 Testing ${test.name}...`);
+    console.log(`   Command: ${test.cmd.toString('hex')}`);
+    console.log(`   Length: ${test.cmd.length} bytes`);
+    
+    try {
+      const response = await sendCommand(path, test.cmd, 2000);
+      if (response && response.length > 0) {
+        console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        analyzeResponse(response, test.name);
+        
+        // Check for ACK response (10 01) or status data (not NAK)
+        if (response.length >= 2 && response[0] === 0x10 && response[1] === 0x01) {
+          workingCommands++;
+          successfulCommands.push(test.name);
+          console.log(`   🎯 SUCCESS! ${test.name} returned ACK!`);
+        } else if (response[0] >= 0x80) {
+          console.log(`   📊 STATUS DATA! ${test.name} returned status information!`);
+          workingCommands++;
+          successfulCommands.push(test.name);
+        } else if (response[0] !== 0x11) {
+          console.log(`   📊 Different response - not standard NAK!`);
+          workingCommands++;
+          successfulCommands.push(test.name);
+        }
+      } else {
+        console.log(`   ⚠️  No response`);
+      }
+    } catch (error) {
+      console.log(`   ❌ Error: ${error.message}`);
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  
+  console.log(`\n📊 Simple Commands Test Results:`);
+  console.log(`   Commands tested: ${simpleTests.length}`);
+  console.log(`   Working commands: ${workingCommands}`);
+  
+  if (successfulCommands.length > 0) {
+    console.log(`\n✅ Working simple commands:`);
+    successfulCommands.forEach(cmd => console.log(`   - ${cmd}`));
+  }
+  
+  return workingCommands > 0;
 }
 
 // Call the main function if this file is run directly
