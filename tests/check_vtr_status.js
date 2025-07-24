@@ -1089,3 +1089,335 @@ async function testNoTapeCommands(path) {
   for (const test of noTapeCommands) {
     console.log(`\n📡 Testing ${test.name}...`);
     console.log(`   Command: ${test.cmd.toString('hex')}`);
+    
+    try {
+      const response = await sendCommand(path, test.cmd, 2000);
+      if (response && response.length > 0) {
+        console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        analyzeResponse(response, test.name);
+        
+        if (response.length >= 2 && response[0] === 0x10 && response[1] === 0x01) {
+          workingCommands++;
+          console.log(`   🎯 SUCCESS! ${test.name} worked without tape!`);
+        }
+      } else {
+        console.log(`   ⚠️  No response`);
+      }
+    } catch (error) {
+      console.log(`   ❌ Error: ${error.message}`);
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  
+  console.log(`\n📊 No-Tape Commands Test Results:`);
+  console.log(`   Commands tested: ${noTapeCommands.length}`);
+  console.log(`   Working commands: ${workingCommands}`);
+  
+  if (workingCommands > 0) {
+    console.log(`\n✅ Some commands work without tape! This suggests the VTR is communicating.`);
+  } else {
+    console.log(`\n⚠️ No commands worked - check VTR configuration.`);
+  }
+  
+  return workingCommands > 0;
+}
+
+/**
+ * Check if tape is loaded
+ */
+async function checkTapeStatus(path) {
+  console.log(`📼 Checking tape status on ${path}...`);
+  
+  try {
+    const status = await getVtrStatus(path);
+    
+    if (status.tape) {
+      console.log(`✅ Tape is loaded`);
+      console.log(`   📼 Timecode: ${status.timecode}`);
+      console.log(`   ⚡ Mode: ${status.mode.toUpperCase()}`);
+    } else {
+      console.log(`❌ No tape loaded`);
+      console.log(`💡 Try inserting a tape and wait for threading to complete`);
+    }
+    
+    return status.tape;
+  } catch (error) {
+    console.log(`❌ Cannot check tape status: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Test alternative command formats
+ */
+async function testAlternativeCommands(path) {
+  console.log(`🔀 Testing alternative command formats on ${path}...`);
+  
+  const alternatives = [
+    { name: 'Status - No Parameters', cmd: Buffer.from([0x88, 0x01, 0x61, 0xFF]) },
+    { name: 'Status - Alt Format', cmd: Buffer.from([0x88, 0x01, 0x60, 0x20, 0xFF]) },
+    { name: 'Device Type - Simple', cmd: Buffer.from([0x88, 0x01, 0x00, 0xFF]) },
+    { name: 'Local Disable - Simple', cmd: Buffer.from([0x88, 0x01, 0x0C, 0xFF]) },
+    { name: 'Ping Command', cmd: Buffer.from([0x88, 0x01, 0x01, 0xFF]) }
+  ];
+  
+  let workingCommands = 0;
+  
+  for (const alt of alternatives) {
+    console.log(`\n📡 Testing ${alt.name}...`);
+    console.log(`   Command: ${alt.cmd.toString('hex')}`);
+    
+    try {
+      const response = await sendCommand(path, alt.cmd, 2000);
+      if (response && response.length > 0) {
+        console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        analyzeResponse(response, alt.name);
+        
+        if (response.length >= 2 && response[0] === 0x10 && response[1] === 0x01) {
+          workingCommands++;
+          console.log(`   🎯 SUCCESS! ${alt.name} worked!`);
+        }
+      } else {
+        console.log(`   ⚠️  No response`);
+      }
+    } catch (error) {
+      console.log(`   ❌ Error: ${error.message}`);
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  
+  console.log(`\n📊 Alternative Commands Test Results:`);
+  console.log(`   Commands tested: ${alternatives.length}`);
+  console.log(`   Working commands: ${workingCommands}`);
+  
+  return workingCommands > 0;
+}
+
+/**
+ * Test commands with proper checksums
+ */
+async function testChecksumCommands(path) {
+  console.log(`🧮 Testing Sony commands with proper checksums on ${path}...`);
+  
+  const testCommands = [
+    { name: 'Device Type', cmd: VTR_COMMANDS_CORRECTED.DEVICE_TYPE },
+    { name: 'Status Simple', cmd: VTR_COMMANDS_CORRECTED.STATUS_SIMPLE },
+    { name: 'Status Extended', cmd: VTR_COMMANDS_CORRECTED.STATUS },
+    { name: 'Local Disable', cmd: VTR_COMMANDS_CORRECTED.LOCAL_DISABLE },
+    { name: 'Timecode', cmd: VTR_COMMANDS_CORRECTED.TIMECODE },
+    { name: 'Stop', cmd: VTR_COMMANDS_CORRECTED.STOP },
+    { name: 'Play', cmd: VTR_COMMANDS_CORRECTED.PLAY }
+  ];
+  
+  let workingCommands = 0;
+  let ackCommands = [];
+  
+  for (const test of testCommands) {
+    if (!test.cmd) {
+      console.log(`\n❌ ${test.name} command is undefined - skipping`);
+      continue;
+    }
+    
+    console.log(`\n📡 Testing ${test.name}...`);
+    console.log(`   Command: ${test.cmd.toString('hex')}`);
+    console.log(`   Checksum valid: ${verifyChecksum(test.cmd) ? '✅' : '❌'}`);
+    
+    try {
+      const response = await sendCommand(path, test.cmd, 2000);
+      if (response && response.length > 0) {
+        console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        analyzeResponse(response, test.name);
+        
+        if (response.length >= 2 && response[0] === 0x10 && response[1] === 0x01) {
+          workingCommands++;
+          ackCommands.push(test.name);
+          console.log(`   🎯 SUCCESS! This command worked with proper checksum!`);
+        }
+      } else {
+        console.log(`   ⚠️  No response`);
+      }
+    } catch (error) {
+      console.log(`   ❌ Error: ${error.message}`);
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  
+  console.log(`\n📊 Checksum Test Results:`);
+  console.log(`   Commands tested: ${testCommands.length}`);
+  console.log(`   ACK responses: ${workingCommands}`);
+  
+  if (ackCommands.length > 0) {
+    console.log(`\n✅ Working commands with checksums:`);
+    ackCommands.forEach(cmd => console.log(`   - ${cmd}`));
+    console.log(`\n🎉 SUCCESS! Proper checksums fixed the communication!`);
+  } else {
+    console.log(`\n⚠️ Still no ACK responses. This suggests:`);
+    console.log(`   - VTR setup menu still has serial control disabled`);
+    console.log(`   - Different protocol variant needed`);
+    console.log(`   - Hardware/wiring issue`);
+  }
+  
+  return workingCommands > 0;
+}
+
+/**
+ * Test extended status commands
+ */
+async function testExtendedStatus(path) {
+  console.log(`📊 Testing extended status commands on ${path}...`);
+  
+  const extendedCommands = [
+    { name: 'Extended Status', cmd: VTR_COMMANDS_CORRECTED.STATUS },
+    { name: 'Device Type', cmd: VTR_COMMANDS_CORRECTED.DEVICE_TYPE },
+    { name: 'Timecode', cmd: VTR_COMMANDS_CORRECTED.TIMECODE },
+    { name: 'Tape Timer', cmd: VTR_COMMANDS_CORRECTED.TAPE_TIMER }
+  ];
+  
+  let workingCommands = 0;
+  
+  for (const test of extendedCommands) {
+    if (!test.cmd) {
+      console.log(`\n❌ ${test.name} command is undefined - skipping`);
+      continue;
+    }
+    
+    console.log(`\n📡 Testing ${test.name}...`);
+    console.log(`   Command: ${test.cmd.toString('hex')}`);
+    
+    try {
+      const response = await sendCommand(path, test.cmd, 3000);
+      if (response && response.length > 0) {
+        console.log(`   ✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        analyzeResponse(response, test.name);
+        
+        if (response.length >= 2 && response[0] === 0x10 && response[1] === 0x01) {
+          console.log(`   🎯 SUCCESS! ${test.name} returned ACK!`);
+          workingCommands++;
+        }
+      } else {
+        console.log(`   ⚠️  No response`);
+      }
+    } catch (error) {
+      console.log(`   ❌ Error: ${error.message}`);
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  return workingCommands > 0;
+}
+
+/**
+ * Show VTR menu configuration guide
+ */
+function showVtrMenuGuide() {
+  console.log('\n📋 VTR Menu Configuration Guide');
+  console.log('===============================');
+  console.log('\n🔧 To enable serial control on your VTR:');
+  console.log('\n1️⃣ Access VTR Menu:');
+  console.log('   • Press MENU button on VTR front panel');
+  console.log('   • Navigate using arrow keys or jog wheel');
+  
+  console.log('\n2️⃣ Find Remote Control Settings:');
+  console.log('   • Look for: SETUP → REMOTE');
+  console.log('   • Or: SETUP → INTERFACE');
+  console.log('   • Or: SYSTEM → REMOTE CONTROL');
+  
+  console.log('\n3️⃣ Enable Serial Control:');
+  console.log('   • Set "9PIN REMOTE" → ON');
+  console.log('   • Set "RS422 REMOTE" → ON');
+  console.log('   • Set "SERIAL CONTROL" → ON');
+  console.log('   • Set "REMOTE CONTROL" → ON');
+  
+  console.log('\n4️⃣ Check Serial Settings:');
+  console.log('   • Baud Rate: 38400');
+  console.log('   • Protocol: Sony 9-pin');
+  console.log('   • Device ID: 1 (or note the actual ID)');
+  
+  console.log('\n5️⃣ Save and Exit:');
+  console.log('   • Press MENU to save settings');
+  console.log('   • Exit menu system');
+  console.log('   • Power cycle VTR if required');
+  
+  console.log('\n💡 Additional Notes:');
+  console.log('   • Some VTRs have LOCAL/REMOTE button - press REMOTE');
+  console.log('   • Check for REMOTE indicator on VTR display');
+  console.log('   • Insert a tape for full command testing');
+}
+
+/**
+ * Diagnose potential menu configuration issues
+ */
+function diagnoseMenuIssue() {
+  console.log('\n🔍 Menu Configuration Diagnosis');
+  console.log('==============================');
+  console.log('\nBased on consistent NAK responses with proper protocol:');
+  console.log('\n❌ Issue: VTR serial control is DISABLED in menu');
+  console.log('\n✅ Solution: Enable serial control in VTR setup menu');
+  console.log('\n📋 Required Menu Settings:');
+  console.log('   • 9PIN REMOTE: ON');
+  console.log('   • RS422 REMOTE: ON'); 
+  console.log('   • SERIAL CONTROL: ON');
+  console.log('   • REMOTE CONTROL: ON');
+  console.log('\n🔧 How to Access:');
+  console.log('   1. Press MENU on VTR front panel');
+  console.log('   2. Navigate to SETUP → REMOTE');
+  console.log('   3. Enable all serial control options');
+  console.log('   4. Save and exit menu');
+  console.log('\n💡 This will change NAK responses to ACK responses.');
+}
+
+// Call the main function if this file is run directly
+if (require.main === module) {
+  interactiveCheck().catch(error => {
+    console.error('❌ Error:', error.message);
+    process.exit(1);
+  });
+}
+
+// Export functions for use by other modules
+module.exports = {
+  checkSingleVtr,
+  checkSingleVtrEnhanced,
+  scanAllVtrs,
+  monitorVtr,
+  testVtrCommands,
+  testCommunication,
+  testNoTapeCommands,
+  testAlternativeCommands,
+  testChecksumCommands,
+  testExtendedStatus,
+  checkTapeStatus,
+  diagnosticCheck,
+  establishRemoteControl,
+  showTroubleshootingGuide,
+  showVtrMenuGuide,
+  sendRawCommand,
+  calculateChecksum,
+  createSonyCommand,
+  verifyChecksum,
+  playVtr,
+  pauseVtr,
+  stopVtr,
+  recordVtr,
+  fastForwardVtr,
+  rewindVtr,
+  ejectTape,
+  jogForward,
+  jogReverse,
+  shuttlePlus1,
+  shuttleMinus1,
+  getExtendedStatus,
+  getDeviceType,
+  controlVtr,
+  batchControlVtrs,
+  sendVtrCommand,
+  analyzeResponse,
+  diagnoseMenuIssue,
+  testModelVariants,
+  VTR_COMMANDS,
+  VTR_COMMANDS_CORRECTED
+};
