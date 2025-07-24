@@ -86,6 +86,27 @@ const VTR_COMMANDS_CORRECTED = {
   TAPE_TIMER: Buffer.from([0x75, 0x20, 0x55])      // Tape timer
 };
 
+// Simple format commands without STX/ETX framing
+const VTR_COMMANDS_SIMPLE = {
+  // Single byte commands
+  PLAY: Buffer.from([0x20]),                     // Just PLAY command
+  STOP: Buffer.from([0x2F]),                     // Just STOP command
+  PAUSE: Buffer.from([0x25]),                    // Just PAUSE command
+  STATUS: Buffer.from([0x61]),                   // Just STATUS command
+  DEVICE_TYPE: Buffer.from([0x00]),              // Just DEVICE TYPE
+  LOCAL_DISABLE: Buffer.from([0x0C]),            // Just LOCAL DISABLE
+  
+  // Two byte commands
+  PLAY_PARAM: Buffer.from([0x20, 0x00]),         // PLAY with parameter
+  STATUS_PARAM: Buffer.from([0x61, 0x20]),       // STATUS with parameter
+  DEVICE_PARAM: Buffer.from([0x00, 0x11]),       // DEVICE with parameter
+  
+  // Three byte commands with checksum
+  PLAY_CHECKSUM: Buffer.from([0x20, 0x00, 0x20]), // PLAY with checksum
+  STATUS_CHECKSUM: Buffer.from([0x61, 0x20, 0x41]), // STATUS with checksum
+  DEVICE_CHECKSUM: Buffer.from([0x00, 0x11, 0x11])  // DEVICE with checksum
+};
+
 /**
  * Send a control command to VTR
  * @param {string} path - VTR port path
@@ -1132,6 +1153,9 @@ async function testNoTapeCommands(path) {
         if (response.length >= 2 && response[0] === 0x10 && response[1] === 0x01) {
           workingCommands++;
           console.log(`   🎯 SUCCESS! ${test.name} worked without tape!`);
+        } else if (response[0] >= 0x80) {
+          console.log(`   📊 STATUS DATA! ${test.name} returned status information!`);
+          workingCommands++;
         }
       } else {
         console.log(`   ⚠️  No response`);
@@ -1506,5 +1530,6 @@ module.exports = {
   testModelVariants,
   VTR_COMMANDS,
   VTR_COMMANDS_CORRECTED,
-  testCommandFormats
+  testCommandFormats,
+  testSimpleCommands
 };
