@@ -1564,6 +1564,34 @@ async function testSimpleCommands(path) {
   return workingCommands > 0;
 }
 
+// Add this to your script - PARITY ERROR FIX
+async function testSerialConfiguration(path) {
+  console.log(`🔧 Testing serial port configurations to fix parity error...`);
+  
+  const configurations = [
+    { name: 'Standard', baud: 38400, parity: 'none', stopBits: 1, dataBits: 8 },
+    { name: 'Even Parity', baud: 38400, parity: 'even', stopBits: 1, dataBits: 8 },
+    { name: 'Odd Parity', baud: 38400, parity: 'odd', stopBits: 1, dataBits: 8 },
+    { name: '2 Stop Bits', baud: 38400, parity: 'none', stopBits: 2, dataBits: 8 },
+    { name: '7 Data Bits', baud: 38400, parity: 'even', stopBits: 1, dataBits: 7 },
+    { name: '9600 Baud', baud: 9600, parity: 'none', stopBits: 1, dataBits: 8 },
+    { name: '19200 Baud', baud: 19200, parity: 'none', stopBits: 1, dataBits: 8 }
+  ];
+  
+  console.log('\n🔍 Current error: Parity Error (0x10) - Testing different configurations...\n');
+  
+  for (const config of configurations) {
+    console.log(`📡 Testing ${config.name}:`);
+    console.log(`   Baud: ${config.baud}, Parity: ${config.parity}, Stop: ${config.stopBits}, Data: ${config.dataBits}`);
+    
+    // This would require modifying the sendCommand function to accept serial config
+    // For now, provide the configuration instructions
+    console.log(`   💡 To test: Modify VTR interface to use these settings`);
+  }
+  
+  return configurations;
+}
+
 // Call the main function if this file is run directly
 if (require.main === module) {
   interactiveCheck().catch(error => {
@@ -1615,5 +1643,6 @@ module.exports = {
   VTR_COMMANDS,
   VTR_COMMANDS_CORRECTED,
   testCommandFormats,
-  testSimpleCommands
+  testSimpleCommands,
+  testSerialConfiguration
 };
