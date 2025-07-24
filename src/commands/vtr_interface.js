@@ -103,7 +103,11 @@ async function sendCommand(path, command, timeout = 5000) {
         dataBits: 8,
         stopBits: 1,
         parity: 'odd',
-        autoOpen: false
+        autoOpen: false,
+        xon: false,
+        xoff: false,
+        rtscts: false,      // Hardware flow control off
+        xany: false
       });
 
       timeoutHandle = setTimeout(() => {
