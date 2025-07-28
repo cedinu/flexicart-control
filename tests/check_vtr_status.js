@@ -864,6 +864,118 @@ async function testVtrCommands(path) {
 }
 
 /**
+ * Test timecode during transport to see if it updates (alias for testTimecodeAdvancement)
+ * @param {string} path - VTR port path
+ */
+async function testTimecodeMovement(path) {
+  return await testTimecodeAdvancement(path);
+}
+
+/**
+ * Get detailed timecode from multiple sources
+ * @param {string} path - VTR port path  
+ * @returns {string} Detailed timecode info
+ */
+async function getDetailedTimecode(path) {
+  const commands = [
+    { name: 'Standard', cmd: Buffer.from([0x74, 0x20, 0x54]) },
+    { name: 'LTC', cmd: Buffer.from([0x78, 0x20, 0x58]) },
+    { name: 'Timer1', cmd: Buffer.from([0x75, 0x20, 0x55]) }
+  ];
+  
+  const results = [];
+  
+  for (const cmd of commands) {
+    try {
+      const response = await sendCommand(path, cmd.cmd, 1000);
+      const decoded = decodeTimecodeResponse(response, cmd.name);
+      results.push(`${cmd.name}:${decoded || 'N/A'}`);
+    } catch (e) {
+      results.push(`${cmd.name}:ERROR`);
+    }
+  }
+  
+  return results.join(' | ');
+}
+
+/**
+ * Decode timecode response based on Sony 9-pin protocol variations
+ * @param {Buffer} response - Raw response buffer
+ * @param {string} commandName - Name of command that generated response
+ * @returns {string|null} Decoded timecode or null if not valid
+ */
+function decodeTimecodeResponse(response, commandName) {
+  if (!response || response.length < 3) return null;
+  
+  const bytes = Array.from(response);
+  const hex = response.toString('hex');
+  
+  console.log(`🔍 Analyzing ${commandName} response pattern:`);
+  
+  // Check for "no timecode" patterns
+  if (hex === '917700' || hex === '919100' || hex === '000000') {
+    console.log(`   ⚠️  Pattern indicates no timecode available`);
+    return null;
+  }
+  
+  // Try different Sony 9-pin timecode formats
+  
+  // Format 1: Standard BCD timecode (4+ bytes)
+  if (response.length >= 4) {
+    try {
+      const hours = bcdToBin(bytes[0]);
+      const minutes = bcdToBin(bytes[1]);
+      const seconds = bcdToBin(bytes[2]);
+      const frames = bcdToBin(bytes[3]);
+      
+      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
+        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+        console.log(`   ✅ BCD format: ${timecode}`);
+        return timecode;
+      }
+    } catch (e) {
+      // BCD decode failed, try other formats
+    }
+  }
+  
+  // Format 2: Binary timecode
+  if (response.length >= 4) {
+    const hours = bytes[0];
+    const minutes = bytes[1];
+    const seconds = bytes[2];
+    const frames = bytes[3];
+    
+    if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
+      const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+      console.log(`   ✅ Binary format: ${timecode}`);
+      return timecode;
+    }
+  }
+  
+  // Format 3: Packed timecode (Sony specific)
+  if (response.length >= 3) {
+    try {
+      const packed = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
+      const frames = packed & 0x3F;
+      const seconds = (packed >> 6) & 0x3F;
+      const minutes = (packed >> 12) & 0x3F;
+      const hours = (packed >> 18) & 0x1F;
+      
+      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
+        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+        console.log(`   ✅ Packed format: ${timecode}`);
+        return timecode;
+      }
+    } catch (e) {
+      // Packed decode failed
+    }
+  }
+  
+  console.log(`   ❓ Unknown format - Raw: ${hex}`);
+  return null;
+}
+
+/**
  * Interactive VTR control
  */
 async function controlVtr(path) {
