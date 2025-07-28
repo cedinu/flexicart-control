@@ -1623,3 +1623,168 @@ module.exports = {
   testSimpleCommands,
   decodeVtrStatusResponse
 };
+
+// Add this function before the module.exports section
+/**
+ * Decode VTR status responses based on command type
+ * @param {Buffer} response - VTR response buffer
+ * @param {string} commandType - Type of command that generated the response
+ * @returns {Object} Decoded status information
+ */
+function decodeVtrStatusResponse(response, commandType) {
+  if (!response || response.length === 0) return null;
+  
+  console.log(`🔍 Decoding ${commandType} response:`);
+  
+  switch(commandType.toLowerCase()) {
+    case 'play':
+      if (response.length >= 2) {
+        const status1 = response[0]; // Transport status
+        const status2 = response[1]; // Mode status
+        
+        console.log(`   🎮 Transport Status: 0x${status1.toString(16)} (${status1})`);
+        console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
+        
+        // Decode transport status bits
+        if (status1 & 0x80) console.log(`     - Play mode active`);
+        if (status1 & 0x40) console.log(`     - Servo locked`);
+        if (status1 & 0x20) console.log(`     - Tape threading`);
+        if (status1 & 0x10) console.log(`     - Direction forward`);
+        if (status1 & 0x08) console.log(`     - Fast mode`);
+        if (status1 & 0x04) console.log(`     - Still mode`);
+        if (status1 & 0x02) console.log(`     - Cue up complete`);
+        if (status1 & 0x01) console.log(`     - Servo ref missing`);
+        
+        return { mode: 'PLAY', transport: status1, modeStatus: status2 };
+      }
+      break;
+      
+    case 'stop':
+      if (response.length >= 3) {
+        const status1 = response[0]; // Transport status
+        const status2 = response[1]; // Mode status
+        const status3 = response[2]; // Additional status
+        
+        console.log(`   🛑 Transport Status: 0x${status1.toString(16)} (${status1})`);
+        console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
+        console.log(`   🎛️  Additional Status: 0x${status3.toString(16)} (${status3})`);
+        
+        // Decode status bits
+        if (status1 & 0x80) console.log(`     - Standby mode`);
+        if (status1 & 0x40) console.log(`     - Stop mode active`);
+        if (status1 & 0x20) console.log(`     - Tape loaded`);
+        if (status1 & 0x10) console.log(`     - Threading complete`);
+        
+        return { mode: 'STOP', transport: status1, modeStatus: status2, additional: status3 };
+      }
+      break;
+      
+    case 'rewind':
+      if (response.length >= 3) {
+        const status1 = response[0]; // Transport status
+        const status2 = response[1]; // Mode status
+        const status3 = response[2]; // Additional status
+        
+        console.log(`   ⏪ Rewind Status: 0x${status1.toString(16)} (${status1})`);
+        console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
+        console.log(`   🎛️  Additional Status: 0x${status3.toString(16)} (${status3})`);
+        
+        // Decode rewind status
+        if (status1 & 0x80) console.log(`     - Rewind mode active`);
+        if (status1 & 0x40) console.log(`     - High speed rewind`);
+        if (status1 & 0x20) console.log(`     - Tape moving`);
+        if (status1 & 0x10) console.log(`     - Direction reverse`);
+        
+        return { mode: 'REWIND', transport: status1, modeStatus: status2, additional: status3 };
+      }
+      break;
+      
+    case 'timecode':
+    case 'extended status':
+      if (response.length >= 3) {
+        const byte1 = response[0];
+        const byte2 = response[1];
+        const byte3 = response[2];
+        
+        console.log(`   🕐 Status Byte 1: 0x${byte1.toString(16)} (${byte1})`);
+        console.log(`   📊 Status Byte 2: 0x${byte2.toString(16)} (${byte2})`);
+        console.log(`   📊 Status Byte 3: 0x${byte3.toString(16)} (${byte3})`);
+        
+        // Try to decode as timecode if it looks like timecode data
+        if (response.length >= 4) {
+          const frames = response[0] & 0x3F;
+          const seconds = response[1] & 0x7F;
+          const minutes = response[2] & 0x7F;
+          const hours = response[3] & 0x3F;
+          
+          if (frames < 30 && seconds < 60 && minutes < 60 && hours < 24) {
+            const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+            console.log(`   🕐 Decoded Timecode: ${timecode}`);
+            return { timecode, raw: response };
+          }
+        }
+        
+        return { statusData: { byte1, byte2, byte3 }, raw: response };
+      }
+      break;
+      
+    case 'device type':
+      if (response.length >= 3) {
+        const deviceId = response[0];
+        const subType = response[1];
+        const version = response[2];
+        
+        console.log(`   📺 Device ID: 0x${deviceId.toString(16)} (${deviceId})`);
+        console.log(`   📺 Sub-type: 0x${subType.toString(16)} (${subType})`);
+        console.log(`   📺 Version: 0x${version.toString(16)} (${version})`);
+        
+        // Try to identify device type
+        let deviceName = 'Unknown';
+        if (deviceId === 0xBA) {
+          deviceName = 'HDW Series VTR';
+        } else if (deviceId >= 0x10 && deviceId <= 0x1F) {
+          deviceName = 'BVW Series VTR';
+        } else if (deviceId >= 0x20 && deviceId <= 0x2F) {
+          deviceName = 'DVW Series VTR';
+        }
+        
+        console.log(`   📺 Identified as: ${deviceName}`);
+        
+        return { deviceId, subType, version, deviceName, raw: response };
+      }
+      break;
+      
+    case 'raw command':
+    default:
+      // Generic status data analysis
+      if (response.length > 0) {
+        console.log(`   📊 Raw data analysis:`);
+        
+        // Check for common patterns
+        if (response[0] === 0x10 && response.length >= 2 && response[1] === 0x01) {
+          console.log(`     - ACK response (command successful)`);
+          return { type: 'ACK', success: true, raw: response };
+        } else if (response[0] === 0x11 && response.length >= 2 && response[1] === 0x12) {
+          console.log(`     - NAK response (command failed)`);
+          return { type: 'NAK', success: false, raw: response };
+        } else if (response[0] >= 0x80) {
+          console.log(`     - Status data (transport/mode information)`);
+          
+          // Try to decode as transport status
+          const status = response[0];
+          if (status & 0x80) console.log(`       * Transport active`);
+          if (status & 0x40) console.log(`       * Mode bit 1 set`);
+          if (status & 0x20) console.log(`       * Mode bit 2 set`);
+          if (status & 0x10) console.log(`       * Mode bit 3 set`);
+          
+          return { type: 'STATUS_DATA', status, raw: response };
+        } else {
+          console.log(`     - Unknown response pattern`);
+          return { type: 'UNKNOWN', raw: response };
+        }
+      }
+      break;
+  }
+  
+  return { raw: response };
+}
