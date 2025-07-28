@@ -32,59 +32,68 @@ function verifyChecksum(command) {
   return providedChecksum === calculatedChecksum;
 }
 
-// Updated VTR_COMMANDS based on official Sony protocol
+// Fix VTR_COMMANDS - Remove RECORD to avoid 20-02
 const VTR_COMMANDS = {
-  // Device Control Commands (CMD1=20)
-  STOP: Buffer.from([0x20, 0x00, 0x20]),           // 20-00 STOP + checksum
-  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // 20-01 PLAY + checksum
-  // RECORD: Buffer.from([0x20, 0x02, 0x22]),      // 20-02 RECORD (avoided)
-  STANDBY_OFF: Buffer.from([0x20, 0x04, 0x24]),    // 20-04 STANDBY OFF
+  // Device Control Commands (CMD1=20) - Standard HDW commands
+  STOP: Buffer.from([0x20, 0x00, 0x20]),           // 20-00 STOP + checksum ✅
+  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // 20-01 PLAY + checksum ✅
+  // RECORD: REMOVED - 20-02 is RECORD which we're avoiding
+  STANDBY_OFF: Buffer.from([0x20, 0x04, 0x24]),    // 20-04 STANDBY OFF (NOT RECORD!)
   STANDBY_ON: Buffer.from([0x20, 0x05, 0x25]),     // 20-05 STANDBY ON
   DMC_START: Buffer.from([0x20, 0x0D, 0x2D]),      // 20-0D DMC START
   EJECT: Buffer.from([0x20, 0x0F, 0x2F]),          // 20-0F EJECT
-  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // 20-10 FAST FWD
-  JOG_FORWARD: Buffer.from([0x2X, 0x11, 0x3X]),    // 2X-11 JOG FWD (X=speed)
-  VAR_FORWARD: Buffer.from([0x2X, 0x12, 0x3X]),    // 2X-12 VAR FWD
-  SHUTTLE_FORWARD: Buffer.from([0x2X, 0x13, 0x3X]), // 2X-13 SHUTTLE FWD
-  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // 20-20 REWIND + checksum
-  JOG_REVERSE: Buffer.from([0x2X, 0x21, 0x4X]),    // 2X-21 JOG REV
-  VAR_REVERSE: Buffer.from([0x2X, 0x22, 0x4X]),    // 2X-22 VAR REV
-  SHUTTLE_REVERSE: Buffer.from([0x2X, 0x23, 0x4X]), // 2X-23 SHUTTLE REV
+  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // 20-10 FAST FWD ✅
+  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // 20-20 REWIND ✅
+  
+  // Variable speed commands (3-byte format) - CORRECTED checksums
+  JOG_FORWARD_SLOW: Buffer.from([0x21, 0x11, 0x30]),     // 0x21^0x11 = 0x30
+  JOG_FORWARD_NORMAL: Buffer.from([0x22, 0x11, 0x33]),   // 0x22^0x11 = 0x33
+  VAR_FORWARD_SLOW: Buffer.from([0x21, 0x12, 0x33]),     // 0x21^0x12 = 0x33
+  SHUTTLE_FORWARD_1X: Buffer.from([0x21, 0x13, 0x32]),   // 0x21^0x13 = 0x32
+  
+  JOG_REVERSE_SLOW: Buffer.from([0x21, 0x21, 0x00]),     // 0x21^0x21 = 0x00
+  JOG_REVERSE_NORMAL: Buffer.from([0x22, 0x21, 0x03]),   // 0x22^0x21 = 0x03
+  VAR_REVERSE_SLOW: Buffer.from([0x21, 0x22, 0x03]),     // 0x21^0x22 = 0x03
+  SHUTTLE_REVERSE_1X: Buffer.from([0x21, 0x23, 0x02]),   // 0x21^0x23 = 0x02
   
   // System Commands
-  LOCAL_DISABLE: Buffer.from([0x00, 0x0C, 0x0C]),  // 00-0C LOCAL DISABLE
-  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // 00-11 DEVICE TYPE REQUEST
+  LOCAL_DISABLE: Buffer.from([0x00, 0x0C, 0x0C]),  // 00-0C LOCAL DISABLE ✅
+  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // 00-11 DEVICE TYPE REQUEST ✅
   LOCAL_ENABLE: Buffer.from([0x00, 0x1D, 0x1D]),   // 00-1D LOCAL ENABLE
   
   // Status Commands
   STATUS_SENSE: Buffer.from([0x61, 0x0A, 0x6B]),   // 61-0A STATUS SENSE
-  POSITION_SENSE: Buffer.from([0x61, 0x20, 0x41]), // 61-20 POSITION SENSE
+  POSITION_SENSE: Buffer.from([0x61, 0x20, 0x41]), // 61-20 POSITION SENSE ✅
   TIMER_MODE_SENSE: Buffer.from([0x74, 0x00, 0x74]), // 74-00 TIMER MODE SENSE
   
   // Alternative commands that work
-  STATUS: Buffer.from([0x61, 0x20, 0x41]),         // Same as POSITION_SENSE
-  TIMECODE: Buffer.from([0x74, 0x20, 0x54])        // Timer data with position
+  STATUS: Buffer.from([0x61, 0x20, 0x41]),         // Same as POSITION_SENSE ✅
+  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // Timer data with position ✅
+  EXTENDED_STATUS: Buffer.from([0x61, 0x20, 0x41]) // Same as STATUS
 };
 
 // Also update VTR_COMMANDS_CORRECTED
+// Fix VTR_COMMANDS_CORRECTED - Remove RECORD (20-02)
 const VTR_COMMANDS_CORRECTED = {
-  // CORRECT Sony 9-pin transport commands
-  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // PLAY with checksum
-  STOP: Buffer.from([0x20, 0x00, 0x20]),           // STOP with checksum  
-  PAUSE: Buffer.from([0x20, 0x02, 0x22]),          // PAUSE with checksum
-  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // FF with checksum
-  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // REW with checksum CORRECTED!
-  RECORD: Buffer.from([0x20, 0x04, 0x24]),         // RECORD with checksum
+  // CORRECT Sony 9-pin transport commands (NO RECORD 20-02, NO PAUSE for standard HDW)
+  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // PLAY with checksum ✅
+  STOP: Buffer.from([0x20, 0x00, 0x20]),           // STOP with checksum ✅
+  // RECORD: REMOVED - 20-02 is RECORD which we're avoiding
+  // PAUSE: NOT SUPPORTED on standard HDW series (only HDW-S280)
+  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // FF with checksum ✅
+  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // REW with checksum ✅
+  STANDBY_OFF: Buffer.from([0x20, 0x04, 0x24]),    // STANDBY OFF (NOT RECORD!)
+  STANDBY_ON: Buffer.from([0x20, 0x05, 0x25]),     // STANDBY ON
   
   // Status commands (confirmed working)
-  STATUS: Buffer.from([0x61, 0x20, 0x41]),         // Status with data request
-  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // Device type request
-  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // Timecode request
+  STATUS: Buffer.from([0x61, 0x20, 0x41]),         // Status with data request ✅
+  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // Device type request ✅
+  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // Timecode request ✅
   TAPE_TIMER: Buffer.from([0x75, 0x20, 0x55]),     // Tape timer
   
   // Control commands
-  LOCAL_DISABLE: Buffer.from([0x0C, 0x00, 0x0C]),  // Local disable
-  LOCAL_ENABLE: Buffer.from([0x0C, 0x01, 0x0D])    // Local enable
+  LOCAL_DISABLE: Buffer.from([0x00, 0x0C, 0x0C]),  // 00-0C Local disable ✅
+  LOCAL_ENABLE: Buffer.from([0x00, 0x1D, 0x1D])    // 00-1D Local enable
 };
 
 // Simple format commands without STX/ETX framing
@@ -149,11 +158,17 @@ async function playVtr(path) {
 }
 
 /**
- * Pause command
+ * Pause command - NOT AVAILABLE on standard HDW series
  * @param {string} path - VTR port path
  */
 async function pauseVtr(path) {
-  return await sendVtrCommand(path, Buffer.from([0x20, 0x02, 0x22]), 'PAUSE');
+  console.log('⚠️  PAUSE command is NOT supported on standard HDW series VTRs');
+  console.log('💡 PAUSE is only available on HDW-S280 model');
+  console.log('🔄 Use STOP command instead for standard HDW series');
+  
+  // For standard HDW, use STOP instead of PAUSE
+  console.log('📤 Sending STOP command as alternative...');
+  return await sendVtrCommand(path, VTR_COMMANDS.STOP, 'STOP (PAUSE not available)');
 }
 
 /**
@@ -165,12 +180,16 @@ async function stopVtr(path) {
 }
 
 /**
- * Record command
+ * Record command - DISABLED (20-02 is RECORD, which we're avoiding)
  * @param {string} path - VTR port path
  */
 async function recordVtr(path) {
-  console.log('⚠️  RECORD command - use with caution!');
-  return await sendVtrCommand(path, VTR_COMMANDS.RECORD, 'RECORD');
+  console.log('⚠️  RECORD command is DISABLED');
+  console.log('💡 Note: RECORD is 20-02 which you requested to avoid');
+  console.log('🚫 This function will not send any command to prevent accidental recording');
+  
+  // DO NOT send any command - just log and return
+  return false;
 }
 
 /**
@@ -197,19 +216,19 @@ async function ejectTape(path) {
 }
 
 async function jogForward(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.JOG_FORWARD, 'JOG FORWARD');
+  return await sendVtrCommand(path, VTR_COMMANDS.JOG_FORWARD_SLOW, 'JOG FORWARD SLOW');
 }
 
 async function jogReverse(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.JOG_REVERSE, 'JOG REVERSE');
+  return await sendVtrCommand(path, VTR_COMMANDS.JOG_REVERSE_SLOW, 'JOG REVERSE SLOW');
 }
 
 async function shuttlePlus1(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.SHUTTLE_PLUS_1, 'SHUTTLE +1x');
+  return await sendVtrCommand(path, VTR_COMMANDS.SHUTTLE_FORWARD_1X, 'SHUTTLE +1x');
 }
 
 async function shuttleMinus1(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.SHUTTLE_MINUS_1, 'SHUTTLE -1x');
+  return await sendVtrCommand(path, VTR_COMMANDS.SHUTTLE_REVERSE_1X, 'SHUTTLE -1x');
 }
 
 async function getExtendedStatus(path) {
@@ -225,6 +244,7 @@ async function getExtendedStatus(path) {
   }
 }
 
+// Fix getDeviceType function - correct response parsing
 async function getDeviceType(path) {
   console.log(`🔍 Getting device type from ${path}...`);
   
@@ -232,10 +252,18 @@ async function getDeviceType(path) {
     const response = await sendCommand(path, VTR_COMMANDS.DEVICE_TYPE, 3000);
     console.log(`📥 Device Type Response: ${response.toString('hex')}`);
     
-    // Parse device type response
-    if (response.length >= 4) {
-      const deviceId = response[3];
+    // Parse device type response - CORRECTED parsing
+    if (response.length >= 3) {
+      const deviceId = response[0];   // First byte is device ID
+      const subType = response[1];    // Second byte is sub-type
+      const version = response[2];    // Third byte is version
+      
+      console.log(`📺 Device ID: 0x${deviceId.toString(16)} (${deviceId})`);
+      console.log(`📺 Sub-type: 0x${subType.toString(16)} (${subType})`);
+      console.log(`📺 Version: 0x${version.toString(16)} (${version}`);
+      
       const deviceTypes = {
+        0xBA: 'HDW Series VTR',     // Your VTR responds with 0xBA
         0x10: 'BVW series',
         0x20: 'DVW series', 
         0x30: 'HDW series',
@@ -598,13 +626,15 @@ async function diagnoseMenuIssue(path) {
   await establishRemoteControl(path);
   
   console.log('\n3. Testing transport commands...');
-  const commands = ['PLAY', 'STOP', 'PAUSE'];
+  const commands = ['PLAY', 'STOP']; // Remove 'PAUSE' for standard HDW
   for (const cmd of commands) {
     try {
       const cmdBuffer = VTR_COMMANDS[cmd];
-      console.log(`📤 Testing ${cmd}...`);
-      const response = await sendCommand(path, cmdBuffer, 3000);
-      console.log(`✅ ${cmd}: ${response.toString('hex')}`);
+      if (cmdBuffer) {
+        console.log(`📤 Testing ${cmd}...`);
+        const response = await sendCommand(path, cmdBuffer, 3000);
+        console.log(`✅ ${cmd}: ${response.toString('hex')}`);
+      }
     } catch (error) {
       console.log(`❌ ${cmd}: ${error.message}`);
     }
@@ -745,12 +775,14 @@ async function scanAllVtrs() {
  */
 async function testVtrCommands(path) {
   console.log(`🧪 Testing VTR transport commands on ${path}...`);
+  console.log('⚠️  Note: Skipping PAUSE (not supported on standard HDW)');
   
   const commands = [
     { name: 'STOP', func: () => stopVtr(path) },
     { name: 'PLAY', func: () => playVtr(path) },
-    { name: 'PAUSE', func: () => pauseVtr(path) },
-    { name: 'STOP', func: () => stopVtr(path) }
+    { name: 'FAST FORWARD', func: () => fastForwardVtr(path) },
+    { name: 'REWIND', func: () => rewindVtr(path) },
+    { name: 'STOP', func: () => stopVtr(path) }  // End with STOP
   ];
   
   for (const cmd of commands) {
@@ -770,7 +802,8 @@ async function testVtrCommands(path) {
 async function controlVtr(path) {
   console.log(`🎛️ Interactive VTR Control for ${path}`);
   console.log('=====================================');
-  console.log('Commands: play, stop, pause, ff, rew, status, quit');
+  console.log('Commands: play, stop, ff, rew, eject, status, quit');
+  console.log('⚠️  Note: PAUSE not available on standard HDW series');
   
   const readline = require('readline');
   const rl = readline.createInterface({
@@ -791,13 +824,17 @@ async function controlVtr(path) {
             await stopVtr(path);
             break;
           case 'pause':
-            await pauseVtr(path);
+            console.log('⚠️  PAUSE not supported on standard HDW. Use STOP instead.');
+            await stopVtr(path);
             break;
           case 'ff':
             await fastForwardVtr(path);
             break;
           case 'rew':
             await rewindVtr(path);
+            break;
+          case 'eject':
+            await ejectTape(path);
             break;
           case 'status':
             await checkSingleVtr(path);
@@ -807,7 +844,7 @@ async function controlVtr(path) {
             rl.close();
             return;
           default:
-            console.log('Unknown command. Available: play, stop, pause, ff, rew, status, quit');
+            console.log('Unknown command. Available: play, stop, ff, rew, eject, status, quit');
         }
       } catch (error) {
         console.log(`❌ Command failed: ${error.message}`);
@@ -818,6 +855,83 @@ async function controlVtr(path) {
   };
   
   prompt();
+}
+
+/**
+ * Interactive command line interface
+ */
+async function interactiveCheck() {
+  const args = process.argv.slice(2);
+  
+  if (args.length === 0) {
+    console.log('🎬 VTR Status Checker & Controller');
+    console.log('==================================');
+    console.log('Usage:');
+    console.log('  node check_vtr_status.js <port>                    # Check single VTR');
+    console.log('  node check_vtr_status.js --scan                    # Scan all ports');
+    console.log('  node check_vtr_status.js --play <port>             # Send PLAY command');
+    console.log('  node check_vtr_status.js --stop <port>             # Send STOP command');
+    console.log('  node check_vtr_status.js --pause <port>            # Send PAUSE command');
+    console.log('  node check_vtr_status.js --control <port>          # Interactive control');
+    console.log('  node check_vtr_status.js --raw <port> "20 01 21"   # Send raw command');
+    return;
+  }
+  
+  const command = args[0];
+  const port = args[1];
+  const rawCommand = args[2];
+  
+  console.log('🎬 VTR Status Checker & Controller');
+  console.log('==================================');
+  
+  try {
+    switch (command) {
+      case '--scan':
+        await scanAllVtrs();
+        break;
+      case '--play':
+        if (!port) {
+          console.log('❌ Port required for --play');
+          return;
+        }
+        await playVtr(port);
+        break;
+      case '--stop':
+        if (!port) {
+          console.log('❌ Port required for --stop');
+          return;
+        }
+        await stopVtr(port);
+        break;
+      case '--pause':
+        if (!port) {
+          console.log('❌ Port required for --pause');
+          return;
+        }
+        await pauseVtr(port);
+        break;
+      case '--control':
+        if (!port) {
+          console.log('❌ Port required for --control');
+          return;
+        }
+        await controlVtr(port);
+        break;
+      case '--raw':
+        if (!port || !rawCommand) {
+          console.log('❌ Port and command required for --raw');
+          return;
+        }
+        await sendRawCommand(port, rawCommand);
+        break;
+      default:
+        await checkSingleVtr(command);
+        break;
+    }
+  } catch (error) {
+    console.error('❌ Error:', error.message);
+    process.exit(1);
+  }
 }
 
 /**
@@ -875,8 +989,8 @@ function decodeVtrStatusResponse(response, commandType) {
   switch(commandType.toLowerCase()) {
     case 'play':
       if (response.length >= 2) {
-        const status1 = response[0]; // Transport status
-        const status2 = response[1]; // Mode status
+        const status1 = response[0]; // Transport status - MISSING!
+        const status2 = response[1]; // Mode status - MISSING!
         
         console.log(`   🎮 Transport Status: 0x${status1.toString(16)} (${status1})`);
         console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
@@ -913,7 +1027,7 @@ function decodeVtrStatusResponse(response, commandType) {
         
         console.log(`   📺 Device ID: 0x${deviceId.toString(16)} (${deviceId})`);
         console.log(`   📺 Sub-type: 0x${subType.toString(16)} (${subType})`);
-        console.log(`   📺 Version: 0x${version.toString(16)} (${version)}`);
+        console.log(`   📺 Version: 0x${version.toString(16)} (${version}`);
         
         let deviceName = 'Unknown';
         if (deviceId === 0xBA) {
@@ -929,6 +1043,55 @@ function decodeVtrStatusResponse(response, commandType) {
   
   return { raw: response };
 }
+
+/**
+ * Batch control multiple VTRs
+ */
+async function batchControlVtrs(ports, command) {
+  console.log(`🎛️ Sending ${command} to ${ports.length} VTRs...`);
+  
+  const results = [];
+  for (const port of ports) {
+    try {
+      let result;
+      switch (command.toLowerCase()) {
+        case 'play':
+          result = await playVtr(port);
+          break;
+        case 'stop':
+          result = await stopVtr(port);
+          break;
+        case 'ff':
+        case 'fastforward':
+          result = await fastForwardVtr(port);
+          break;
+        case 'rew':
+        case 'rewind':
+          result = await rewindVtr(port);
+          break;
+        // Remove pause and record cases
+        default:
+          throw new Error(`Unknown command: ${command}. Available: play, stop, ff, rew`);
+      }
+      results.push({ port, success: result });
+    } catch (error) {
+      results.push({ port, success: false, error: error.message });
+    }
+  }
+  
+  return results;
+}
+
+/*
+ * Sony 9-pin Variable Speed Data Values:
+ * SPEED = 0x00 (0)    = STILL
+ * SPEED = 0x20 (32)   = 0.1x normal speed  
+ * SPEED = 0x40 (64)   = 1.0x normal speed
+ * SPEED = 0x4F (79)   = About 2.9x normal speed
+ * 
+ * Variable Speed Command Format: [CMD1, CMD2, SPEED, CHECKSUM]
+ * Example: JOG FWD slow = [0x21, 0x11, 0x20, 0x10]
+ */
 
 /**
  * Call the main function if this file is run directly
