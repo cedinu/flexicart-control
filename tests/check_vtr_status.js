@@ -27,6 +27,31 @@ const {
   VtrTransportError
 } = require('../src/commands/vtr_cmds_transport');
 
+// Import status functions
+const {
+  getDeviceType,
+  getExtendedStatus,
+  getVtrStatusNonDestructive,
+  checkSingleVtr,
+  checkSingleVtrEnhanced,
+  debugStatusResponses,
+  testCommunication,
+  testNoTapeCommands,
+  testAlternativeCommands,
+  testExtendedStatus,
+  checkTapeStatus,
+  establishRemoteControl,
+  monitorVtr,
+  analyzeResponse,
+  decodeVtrStatusResponse,
+  interpretVtrStatusResponse,
+  getCommandBuffer,
+  VTR_STATUS_COMMANDS,  // ✅ Import this constant
+  DEVICE_TYPES,
+  VTR_STATUS_PATTERNS,
+  VtrStatusError
+} = require('../src/commands/vtr_cmds_status');
+
 // Helper functions (keep these in test file)
 function calculateChecksum(commandBytes) {
   let checksum = 0;
@@ -102,7 +127,7 @@ async function testCommunication(path) {
   const tests = [
     { name: 'Device Type', cmd: VTR_STATUS_COMMANDS.DEVICE_TYPE },
     { name: 'Status', cmd: VTR_STATUS_COMMANDS.STATUS },
-    { name: 'Timecode', cmd: VTR_STATUS_COMMANDS.TIMECODE }
+    { name: 'Timecode', cmd: Buffer.from([0x74, 0x20, 0x54]) }
   ];
   
   for (const test of tests) {
@@ -263,7 +288,7 @@ async function establishRemoteControl(path) {
   
   try {
     console.log('📤 Sending LOCAL DISABLE command...');
-    const response = await sendCommand(path, VTR_COMMANDS.LOCAL_DISABLE, 3000);
+    const response = await sendCommand(path, VTR_STATUS_COMMANDS.LOCAL_DISABLE, 3000);
     console.log(`✅ Local disable response: ${response.toString('hex')}`);
     
     // Wait a moment
@@ -338,7 +363,7 @@ async function diagnoseMenuIssue(path) {
   const commands = ['PLAY', 'STOP']; // Remove 'PAUSE' for standard HDW
   for (const cmd of commands) {
     try {
-      const cmdBuffer = VTR_COMMANDS[cmd];
+      const cmdBuffer = VTR_TRANSPORT_COMMANDS[cmd] || VTR_STATUS_COMMANDS[cmd];
       if (cmdBuffer) {
         console.log(`📤 Testing ${cmd}...`);
         const response = await sendCommand(path, cmdBuffer, 3000);
@@ -1331,3 +1356,170 @@ module.exports = {
   // Re-export status functions
   ...require('../src/commands/vtr_cmds_status')
 };
+
+// ===== MAIN EXECUTION BLOCK =====
+/**
+ * Main execution function
+ */
+async function main() {
+  const args = process.argv.slice(2);
+  
+  // Show help if no arguments
+  if (args.length === 0) {
+    console.log('🎛️ VTR Control System');
+    console.log('===================');
+    console.log('\nUsage:');
+    console.log('  node check_vtr_status.js --scan                    # Scan for VTRs');
+    console.log('  node check_vtr_status.js --control <port>          # Interactive control');
+    console.log('  node check_vtr_status.js --test <port>             # Test commands');
+    console.log('  node check_vtr_status.js --status <port>           # Check status');
+    console.log('  node check_vtr_status.js --timecode <port>         # Test timecode');
+    console.log('  node check_vtr_status.js --raw <port> <hex_cmd>    # Send raw command');
+    console.log('\nExamples:');
+    console.log('  node check_vtr_status.js --scan');
+    console.log('  node check_vtr_status.js --control /dev/ttyRP11');
+    console.log('  node check_vtr_status.js --test /dev/ttyRP11');
+    console.log('  node check_vtr_status.js --raw /dev/ttyRP11 "20 01 21"');
+    console.log('\n📋 Available VTR ports:');
+    VTR_PORTS.forEach(port => {
+      console.log(`  📼 ${port}`);
+    });
+    return;
+  }
+  
+  const command = args[0];
+  const vtrPath = args[1];
+  
+  try {
+    switch (command) {
+      case '--scan':
+        console.log('🔍 Scanning for VTRs...');
+        await scanAllVtrs();
+        break;
+        
+      case '--control':
+        if (!vtrPath) {
+          console.log('❌ Error: Port path required for control mode');
+          console.log('Usage: node check_vtr_status.js --control <port>');
+          return;
+        }
+        console.log(`🎛️ Starting interactive control for ${vtrPath}...`);
+        await controlVtr(vtrPath);
+        break;
+        
+      case '--test':
+        if (!vtrPath) {
+          console.log('❌ Error: Port path required for test mode');
+          console.log('Usage: node check_vtr_status.js --test <port>');
+          return;
+        }
+        console.log(`🧪 Testing VTR at ${vtrPath}...`);
+        await diagnosticCheck(vtrPath);
+        break;
+        
+      case '--status':
+        if (!vtrPath) {
+          console.log('❌ Error: Port path required for status check');
+          console.log('Usage: node check_vtr_status.js --status <port>');
+          return;
+        }
+        console.log(`📊 Checking status of VTR at ${vtrPath}...`);
+        await checkSingleVtrEnhanced(vtrPath);
+        break;
+        
+      case '--timecode':
+        if (!vtrPath) {
+          console.log('❌ Error: Port path required for timecode test');
+          console.log('Usage: node check_vtr_status.js --timecode <port>');
+          return;
+        }
+        console.log(`🕐 Testing timecode on VTR at ${vtrPath}...`);
+        await testAllTimecodeCommands(vtrPath);
+        break;
+        
+      case '--raw':
+        if (!vtrPath || !args[2]) {
+          console.log('❌ Error: Port path and hex command required for raw mode');
+          console.log('Usage: node check_vtr_status.js --raw <port> "<hex_command>"');
+          console.log('Example: node check_vtr_status.js --raw /dev/ttyRP11 "20 01 21"');
+          return;
+        }
+        const hexCommand = args[2];
+        console.log(`🔧 Sending raw command to VTR at ${vtrPath}...`);
+        await sendRawCommand(vtrPath, hexCommand);
+        break;
+        
+      case '--debug':
+        if (!vtrPath) {
+          console.log('❌ Error: Port path required for debug mode');
+          console.log('Usage: node check_vtr_status.js --debug <port>');
+          return;
+        }
+        console.log(`🔍 Debug analysis of VTR at ${vtrPath}...`);
+        await debugStatusResponses(vtrPath);
+        break;
+        
+      case '--tape-tc':
+        if (!vtrPath) {
+          console.log('❌ Error: Port path required for tape timecode test');
+          console.log('Usage: node check_vtr_status.js --tape-tc <port>');
+          return;
+        }
+        console.log(`🎬 Testing tape timecode on VTR at ${vtrPath}...`);
+        await testTapeTimecodeCommands(vtrPath);
+        break;
+        
+      case '--real-tc':
+        if (!vtrPath) {
+          console.log('❌ Error: Port path required for real timecode test');
+          console.log('Usage: node check_vtr_status.js --real-tc <port>');
+          return;
+        }
+        console.log(`🎯 Finding real tape timecode on VTR at ${vtrPath}...`);
+        const realSources = await testRealTapeTimecode(vtrPath);
+        if (realSources.length > 0) {
+          console.log('\n🎯 REAL TAPE TIMECODE SOURCES FOUND:');
+          realSources.forEach(source => {
+            console.log(`🎯 ${source.name} (${source.command}) - Use this for real tape timecode!`);
+          });
+        }
+        break;
+        
+      case '--help':
+      case '-h':
+        console.log('🎛️ VTR Control System - Help');
+        console.log('===========================');
+        console.log('\nAvailable Commands:');
+        console.log('  --scan                 Scan for VTRs on all ports');
+        console.log('  --control <port>       Interactive VTR control');
+        console.log('  --test <port>          Run diagnostic tests');
+        console.log('  --status <port>        Check VTR status');
+        console.log('  --timecode <port>      Test timecode commands');
+        console.log('  --debug <port>         Debug status responses');
+        console.log('  --tape-tc <port>       Test tape timecode sources');
+        console.log('  --real-tc <port>       Find advancing timecode source');
+        console.log('  --raw <port> <hex>     Send raw hex command');
+        console.log('  --help                 Show this help');
+        break;
+        
+      default:
+        console.log(`❌ Unknown command: ${command}`);
+        console.log('💡 Use --help to see available commands');
+        break;
+    }
+  } catch (error) {
+    console.log(`❌ Error: ${error.message}`);
+    console.error(error.stack);
+    process.exit(1);
+  }
+}
+
+// Only run main() if this file is executed directly (not imported)
+if (require.main === module) {
+  main().catch(error => {
+    console.error('❌ Fatal error:', error.message);
+    console.error(error.stack);
+    process.exit(1);
+  });
+}
+
