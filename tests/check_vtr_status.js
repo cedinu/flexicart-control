@@ -596,6 +596,42 @@ async function interactiveCheck() {
 }
 
 /**
+ * Send raw command to VTR
+ * @param {string} path - VTR port path  
+ * @param {string} commandString - Hex command string (e.g., "20 01 21")
+ */
+async function sendRawCommand(path, commandString) {
+  console.log(`🔧 Sending raw command: ${commandString}`);
+  
+  try {
+    // Parse hex command string
+    const commandBytes = commandString.split(' ').map(hex => parseInt(hex, 16));
+    const command = Buffer.from(commandBytes);
+    
+    console.log(`📤 Command bytes: ${command.toString('hex')}`);
+    console.log(`📤 Command length: ${command.length} bytes`);
+    console.log(`📤 Individual bytes: [${Array.from(command).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
+    
+    const response = await sendCommand(path, command, 3000);
+    
+    if (response && response.length > 0) {
+      console.log(`📥 Response: ${response.toString('hex')} (${response.length} bytes)`);
+      console.log(`📥 Individual bytes: [${Array.from(response).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
+      console.log(`📥 ASCII: "${response.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}"`);
+      console.log(`📥 Binary: ${Array.from(response).map(b => b.toString(2).padStart(8, '0')).join(' ')}`);
+      
+      // Analyze the response
+      analyzeResponse(response, 'Raw Command');
+    } else {
+      console.log('❌ No response received');
+    }
+    
+  } catch (error) {
+    console.log(`❌ Raw command failed: ${error.message}`);
+  }
+}
+
+/**
  * Call the main function if this file is run directly
  */
 if (require.main === module) {
