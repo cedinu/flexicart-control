@@ -1941,7 +1941,7 @@ module.exports = {
   getCommandBuffer,
   // Timecode functions
   testAllTimecodeCommands,
-  testTimecodeMovement,        // ← This was missing!
+  testTimecodeMovement,
   getDetailedTimecode,
   decodeTimecodeResponse,
   testTimecodeAdvancement,
