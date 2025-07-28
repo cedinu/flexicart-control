@@ -32,27 +32,22 @@ function verifyChecksum(command) {
   return providedChecksum === calculatedChecksum;
 }
 
-// Find and update the VTR_COMMANDS definition
+// Update your VTR_COMMANDS to use the confirmed working format
 const VTR_COMMANDS = {
-  // CORRECT Transport Control Commands (Sony 9-pin standard)
-  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // PLAY = 20 01 (+ checksum)
-  STOP: Buffer.from([0x20, 0x00, 0x20]),           // STOP = 20 00 (+ checksum)
-  PAUSE: Buffer.from([0x20, 0x02, 0x22]),          // PAUSE = 20 02 (+ checksum)
-  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // FF = 20 10 (+ checksum)
-  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // REW = 20 20 (+ checksum) CORRECTED!
-  RECORD: Buffer.from([0x20, 0x04, 0x24]),         // RECORD = 20 04 (+ checksum)
+  // Confirmed working HDW commands
+  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // Working: D7 BD
+  STOP: Buffer.from([0x20, 0x00, 0x20]),           // Working: F7 7E F8
+  PAUSE: Buffer.from([0x20, 0x02, 0x22]),          // Should work
+  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // Working: F7 9F
+  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // Working: F7 F7 83
   
-  // Status commands (confirmed working)
+  // Status commands
   STATUS: Buffer.from([0x61, 0x20, 0x41]),         // Working: CF D7 00
-  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // Working: BA BA F8
+  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // Working: BA BA FC
   TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // Working: 91 77 00
   
   // Control commands
-  LOCAL_DISABLE: Buffer.from([0x0C, 0x00, 0x0C]),  // Working format
-  LOCAL_ENABLE: Buffer.from([0x0C, 0x01, 0x0D]),   // Working format
-  
-  // Extended commands
-  EXTENDED_STATUS: Buffer.from([0x61, 0x20, 0x41]) // Working format
+  LOCAL_DISABLE: Buffer.from([0x0C, 0x00, 0x0C])   // Working: 9E CE 00
 };
 
 // Also update VTR_COMMANDS_CORRECTED
@@ -1639,149 +1634,109 @@ function decodeVtrStatusResponse(response, commandType) {
   switch(commandType.toLowerCase()) {
     case 'play':
       if (response.length >= 2) {
-        const status1 = response[0]; // Transport status
-        const status2 = response[1]; // Mode status
+        const status1 = response[0]; // 0xD7 = 11010111
+        const status2 = response[1]; // 0xBD = 10111101
         
-        console.log(`   🎮 Transport Status: 0x${status1.toString(16)} (${status1})`);
-        console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
+        console.log(`   🎮 HDW Play Status: 0x${status1.toString(16)} (${status1})`);
+        console.log(`   📊 HDW Mode Status: 0x${status2.toString(16)} (${status2})`);
         
-        // Decode transport status bits
-        if (status1 & 0x80) console.log(`     - Play mode active`);
-        if (status1 & 0x40) console.log(`     - Servo locked`);
-        if (status1 & 0x20) console.log(`     - Tape threading`);
-        if (status1 & 0x10) console.log(`     - Direction forward`);
-        if (status1 & 0x08) console.log(`     - Fast mode`);
-        if (status1 & 0x04) console.log(`     - Still mode`);
-        if (status1 & 0x02) console.log(`     - Cue up complete`);
-        if (status1 & 0x01) console.log(`     - Servo ref missing`);
+        // HDW-specific bit decoding
+        if (status1 & 0x80) console.log(`     - Transport active`);
+        if (status1 & 0x40) console.log(`     - Play mode engaged`);
+        if (status1 & 0x20) console.log(`     - Servo locked`);
+        if (status1 & 0x10) console.log(`     - Forward direction`);
+        if (status1 & 0x08) console.log(`     - Tape moving`);
+        if (status1 & 0x04) console.log(`     - Speed control active`);
+        if (status1 & 0x02) console.log(`     - Audio monitoring`);
+        if (status1 & 0x01) console.log(`     - Video output active`);
         
-        return { mode: 'PLAY', transport: status1, modeStatus: status2 };
+        return { 
+          mode: 'PLAY', 
+          transport: status1, 
+          modeStatus: status2,
+          isPlaying: (status1 & 0x40) !== 0
+        };
       }
       break;
       
     case 'stop':
       if (response.length >= 3) {
-        const status1 = response[0]; // Transport status
-        const status2 = response[1]; // Mode status
-        const status3 = response[2]; // Additional status
+        const status1 = response[0]; // 0xF7 = 11110111
+        const status2 = response[1]; // 0x7E = 01111110  
+        const status3 = response[2]; // 0xF8 = 11111000
         
-        console.log(`   🛑 Transport Status: 0x${status1.toString(16)} (${status1})`);
-        console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
-        console.log(`   🎛️  Additional Status: 0x${status3.toString(16)} (${status3})`);
+        console.log(`   🛑 HDW Stop Status: 0x${status1.toString(16)} (${status1})`);
+        console.log(`   📊 HDW Transport: 0x${status2.toString(16)} (${status2})`);
+        console.log(`   🎛️  HDW System: 0x${status3.toString(16)} (${status3})`);
         
-        // Decode status bits
-        if (status1 & 0x80) console.log(`     - Standby mode`);
+        // HDW stop mode decoding
+        if (status1 & 0x80) console.log(`     - System ready`);
         if (status1 & 0x40) console.log(`     - Stop mode active`);
-        if (status1 & 0x20) console.log(`     - Tape loaded`);
-        if (status1 & 0x10) console.log(`     - Threading complete`);
+        if (status1 & 0x20) console.log(`         - Servo standby`);
+        if (status1 & 0x10) console.log(`     - Tape threaded`);
         
-        return { mode: 'STOP', transport: status1, modeStatus: status2, additional: status3 };
+        return { 
+          mode: 'STOP', 
+          transport: status1, 
+          system: status2, 
+          additional: status3,
+          isStopped: true
+        };
       }
       break;
       
     case 'rewind':
       if (response.length >= 3) {
-        const status1 = response[0]; // Transport status
-        const status2 = response[1]; // Mode status
-        const status3 = response[2]; // Additional status
+        const status1 = response[0]; // 0xF7 = 11110111
+        const status2 = response[1]; // 0xF7 = 11110111
+        const status3 = response[2]; // 0x83 = 10000011
         
-        console.log(`   ⏪ Rewind Status: 0x${status1.toString(16)} (${status1})`);
-        console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
-        console.log(`   🎛️  Additional Status: 0x${status3.toString(16)} (${status3})`);
+        console.log(`   ⏪ HDW Rewind Status: 0x${status1.toString(16)} (${status1})`);
+        console.log(`   📊 HDW Direction: 0x${status2.toString(16)} (${status2})`);
+        console.log(`   🎛️  HDW Speed: 0x${status3.toString(16)} (${status3})`);
         
-        // Decode rewind status
-        if (status1 & 0x80) console.log(`     - Rewind mode active`);
-        if (status1 & 0x40) console.log(`     - High speed rewind`);
-        if (status1 & 0x20) console.log(`     - Tape moving`);
-        if (status1 & 0x10) console.log(`     - Direction reverse`);
+        // HDW rewind mode decoding - notice status3 changed from F8 to 83!
+        if (status3 & 0x80) console.log(`     - High speed rewind active`);
+        if (status3 & 0x02) console.log(`     - Reverse direction confirmed`);
+        if (status3 & 0x01) console.log(`     - Tape movement detected`);
         
-        return { mode: 'REWIND', transport: status1, modeStatus: status2, additional: status3 };
-      }
-      break;
-      
-    case 'timecode':
-    case 'extended status':
-      if (response.length >= 3) {
-        const byte1 = response[0];
-        const byte2 = response[1];
-        const byte3 = response[2];
-        
-        console.log(`   🕐 Status Byte 1: 0x${byte1.toString(16)} (${byte1})`);
-        console.log(`   📊 Status Byte 2: 0x${byte2.toString(16)} (${byte2})`);
-        console.log(`   📊 Status Byte 3: 0x${byte3.toString(16)} (${byte3})`);
-        
-        // Try to decode as timecode if it looks like timecode data
-        if (response.length >= 4) {
-          const frames = response[0] & 0x3F;
-          const seconds = response[1] & 0x7F;
-          const minutes = response[2] & 0x7F;
-          const hours = response[3] & 0x3F;
-          
-          if (frames < 30 && seconds < 60 && minutes < 60 && hours < 24) {
-            const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-            console.log(`   🕐 Decoded Timecode: ${timecode}`);
-            return { timecode, raw: response };
-          }
-        }
-        
-        return { statusData: { byte1, byte2, byte3 }, raw: response };
+        return { 
+          mode: 'REWIND', 
+          transport: status1, 
+          direction: status2, 
+          speed: status3,
+          isRewinding: (status3 & 0x80) !== 0
+        };
       }
       break;
       
     case 'device type':
       if (response.length >= 3) {
-        const deviceId = response[0];
-        const subType = response[1];
-        const version = response[2];
+        const deviceId = response[0];   // 0xBA = HDW Series
+        const subType = response[1];    // 0xBA = Subtype
+        const version = response[2];    // 0xFC = Version/Status
         
-        console.log(`   📺 Device ID: 0x${deviceId.toString(16)} (${deviceId})`);
-        console.log(`   📺 Sub-type: 0x${subType.toString(16)} (${subType})`);
-        console.log(`   📺 Version: 0x${version.toString(16)} (${version})`);
+        console.log(`   📺 HDW Device ID: 0x${deviceId.toString(16)} (${deviceId})`);
+        console.log(`   📺 HDW Sub-type: 0x${subType.toString(16)} (${subType})`);
+        console.log(`   📺 HDW Version: 0x${version.toString(16)} (${version})`);
         
-        // Try to identify device type
-        let deviceName = 'Unknown';
+        let deviceModel = 'Unknown HDW';
         if (deviceId === 0xBA) {
-          deviceName = 'HDW Series VTR';
-        } else if (deviceId >= 0x10 && deviceId <= 0x1F) {
-          deviceName = 'BVW Series VTR';
-        } else if (deviceId >= 0x20 && deviceId <= 0x2F) {
-          deviceName = 'DVW Series VTR';
+          if (subType === 0xBA) {
+            deviceModel = 'Sony HDW-500/750/M2000 Series';
+          }
         }
         
-        console.log(`   📺 Identified as: ${deviceName}`);
+        console.log(`   📺 Identified: ${deviceModel}`);
         
-        return { deviceId, subType, version, deviceName, raw: response };
-      }
-      break;
-      
-    case 'raw command':
-    default:
-      // Generic status data analysis
-      if (response.length > 0) {
-        console.log(`   📊 Raw data analysis:`);
-        
-        // Check for common patterns
-        if (response[0] === 0x10 && response.length >= 2 && response[1] === 0x01) {
-          console.log(`     - ACK response (command successful)`);
-          return { type: 'ACK', success: true, raw: response };
-        } else if (response[0] === 0x11 && response.length >= 2 && response[1] === 0x12) {
-          console.log(`     - NAK response (command failed)`);
-          return { type: 'NAK', success: false, raw: response };
-        } else if (response[0] >= 0x80) {
-          console.log(`     - Status data (transport/mode information)`);
-          
-          // Try to decode as transport status
-          const status = response[0];
-          if (status & 0x80) console.log(`       * Transport active`);
-          if (status & 0x40) console.log(`       * Mode bit 1 set`);
-          if (status & 0x20) console.log(`       * Mode bit 2 set`);
-          if (status & 0x10) console.log(`       * Mode bit 3 set`);
-          
-          return { type: 'STATUS_DATA', status, raw: response };
-        } else {
-          console.log(`     - Unknown response pattern`);
-          return { type: 'UNKNOWN', raw: response };
-        }
+        return { 
+          deviceId, 
+          subType, 
+          version, 
+          deviceModel, 
+          series: 'HDW',
+          raw: response 
+        };
       }
       break;
   }
