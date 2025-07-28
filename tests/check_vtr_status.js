@@ -502,305 +502,96 @@ function analyzeResponse(response, commandName) {
 }
 
 /**
- * Play command
- * @param {string} path - VTR port path
+ * Interactive command line interface
  */
-async function playVtr(path) {
-  return await sendVtrCommand(path, Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
-}
-
-/**
- * Pause command
- * @param {string} path - VTR port path
- */
-async function pauseVtr(path) {
-  return await sendVtrCommand(path, Buffer.from([0x20, 0x02, 0x22]), 'PAUSE');
-}
-
-/**
- * Stop command
- * @param {string} path - VTR port path
- */
-async function stopVtr(path) {
-  return await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
-}
-
-/**
- * Record command
- * @param {string} path - VTR port path
- */
-async function recordVtr(path) {
-  console.log('⚠️  RECORD command - use with caution!');
-  return await sendVtrCommand(path, VTR_COMMANDS.RECORD, 'RECORD');
-}
-
-/**
- * Fast Forward command
- * @param {string} path - VTR port path
- */
-async function fastForwardVtr(path) {
-  return await sendVtrCommand(path, Buffer.from([0x20, 0x10, 0x30]), 'FAST FORWARD');
-}
-
-/**
- * Rewind command
- * @param {string} path - VTR port path
- */
-async function rewindVtr(path) {
-  return await sendVtrCommand(path, Buffer.from([0x20, 0x20, 0x40]), 'REWIND'); // CORRECTED checksum!
-}
-
-/**
- * HDW-specific command functions
- */
-async function ejectTape(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.EJECT, 'EJECT');
-}
-
-async function jogForward(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.JOG_FORWARD, 'JOG FORWARD');
-}
-
-async function jogReverse(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.JOG_REVERSE, 'JOG REVERSE');
-}
-
-async function shuttlePlus1(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.SHUTTLE_PLUS_1, 'SHUTTLE +1x');
-}
-
-async function shuttleMinus1(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.SHUTTLE_MINUS_1, 'SHUTTLE -1x');
-}
-
-async function getExtendedStatus(path) {
-  console.log(`📊 Getting extended status from ${path}...`);
+async function interactiveCheck() {
+  const args = process.argv.slice(2);
   
-  try {
-    const response = await sendCommand(path, VTR_COMMANDS.EXTENDED_STATUS, 3000);
-    console.log(`📥 Extended Status Response: ${response.toString('hex')}`);
-    return response;
-  } catch (error) {
-    console.log(`❌ Extended status failed: ${error.message}`);
-    return null;
-  }
-}
-
-async function getDeviceType(path) {
-  console.log(`🔍 Getting device type from ${path}...`);
-  
-  try {
-    const response = await sendCommand(path, VTR_COMMANDS.DEVICE_TYPE, 3000);
-    console.log(`📥 Device Type Response: ${response.toString('hex')}`);
-    
-    // Parse device type response
-    if (response.length >= 4) {
-      const deviceId = response[3];
-      const deviceTypes = {
-        0x10: 'BVW series',
-        0x20: 'DVW series', 
-        0x30: 'HDW series',
-        0x40: 'J series',
-        0x50: 'MSW series'
-      };
-      
-      const deviceName = deviceTypes[deviceId] || `Unknown (0x${deviceId.toString(16)})`;
-      console.log(`📺 Device Type: ${deviceName}`);
-      return deviceName;
-    }
-    
-    return 'Unknown';
-  } catch (error) {
-    console.log(`❌ Device type check failed: ${error.message}`);
-    return null;
-  }
-}
-
-/**
- * Check status of a specific VTR port
- * @param {string} path - VTR port path
- */
-async function checkSingleVtr(path) {
-  console.log(`\n🔍 Checking VTR at ${path}...`);
-  
-  try {
-    const status = await getVtrStatus(path);
-    
-    if (status.error) {
-      console.log(`❌ Error: ${status.error}`);
-      return null;
-    }
-    
-    console.log(`✅ VTR Found!`);
-    console.log(`   📼 Timecode: ${status.timecode}`);
-    console.log(`   ⚡ Mode: ${status.mode.toUpperCase()}`);
-    console.log(`   🏃 Speed: ${status.speed}`);
-    console.log(`   💾 Tape: ${status.tape ? 'IN' : 'OUT'}`);
-    
-    // If we have extended status, show it
-    if (status.extended) {
-      const readable = humanizeStatus(status, status.extended);
-      console.log(`   📊 Status: ${readable}`);
-    }
-    
-    return status;
-    
-  } catch (error) {
-    console.log(`❌ Failed: ${error.message}`);
-    return null;
-  }
-}
-
-/**
- * Auto-scan all VTR ports and display results
- */
-async function scanAllVtrs() {
-  console.log('🔎 Scanning all VTR ports...');
-  console.log(`📍 Checking ${VTR_PORTS.length} possible ports`);
-  
-  try {
-    const foundVtrs = await autoScanVtrs();
-    
-    if (foundVtrs.length === 0) {
-      console.log('\n❌ No VTRs detected on any port');
-      console.log('💡 Make sure VTRs are:');
-      console.log('   - Powered on');
-      console.log('   - Connected via RS-422');
-      console.log('   - Configured for serial control');
-      return;
-    }
-    
-    console.log(`\n✅ Found ${foundVtrs.length} VTR(s):`);
-    
-    foundVtrs.forEach((vtr, index) => {
-      console.log(`\n📺 VTR #${index + 1} (${vtr.path})`);
-      console.log(`   📼 Timecode: ${vtr.timecode}`);
-      console.log(`   ⚡ Mode: ${vtr.mode.toUpperCase()}`);
-      console.log(`   🏃 Speed: ${vtr.speed}`);
-      console.log(`   💾 Tape: ${vtr.tape ? 'IN' : 'OUT'}`);
-    });
-    
-  } catch (error) {
-    console.log(`\n❌ Scan failed: ${error.message}`);
-  }
-}
-
-/**
- * Enhanced control menu with HDW-specific commands
- */
-async function controlVtr(path) {
-  console.log(`\n🎮 HDW VTR Control Panel - ${path}`);
-  console.log('=====================================');
-  
-  // First check device type
-  await getDeviceType(path);
-  
-  // Check if VTR is responding
-  try {
-    const status = await getVtrStatus(path);
-    console.log(`📊 Current Status: ${status.mode.toUpperCase()} - TC: ${status.timecode} - Tape: ${status.tape ? 'IN' : 'OUT'}`);
-  } catch (error) {
-    console.log(`❌ Cannot communicate with VTR: ${error.message}`);
+  if (args.length === 0) {
+    console.log('🎬 VTR Status Checker & Controller');
+    console.log('==================================');
+    console.log('Usage:');
+    console.log('  node check_vtr_status.js <port>                    # Check single VTR');
+    console.log('  node check_vtr_status.js --scan                    # Scan all ports');
+    console.log('  node check_vtr_status.js --play <port>             # Send PLAY command');
+    console.log('  node check_vtr_status.js --stop <port>             # Send STOP command');
+    console.log('  node check_vtr_status.js --pause <port>            # Send PAUSE command');
+    console.log('  node check_vtr_status.js --control <port>          # Interactive control');
+    console.log('  node check_vtr_status.js --raw <port> "20 01 21"   # Send raw command');
+    console.log('');
+    console.log('Examples:');
+    console.log('  node check_vtr_status.js /dev/ttyRP11');
+    console.log('  node check_vtr_status.js --scan');
+    console.log('  node check_vtr_status.js --play /dev/ttyRP11');
+    console.log('  node check_vtr_status.js --raw /dev/ttyRP11 "20 01 21"');
     return;
   }
   
-  console.log('\nTransport Commands:');
-  console.log('  1. ▶️  Play');
-  console.log('  2. ⏸️  Pause');
-  console.log('  3. ⏹️  Stop');
-  console.log('  4. ⏩ Fast Forward');
-  console.log('  5. ⏪ Rewind');
-  console.log('  6. 🔴 Record (CAUTION!)');
-  console.log('  7. ⏏️  Eject');
+  const command = args[0];
+  const port = args[1];
+  const rawCommand = args[2];
   
-  console.log('\nJog/Shuttle Commands:');
-  console.log('  8. 🔄 Jog Forward');
-  console.log('  9. 🔄 Jog Reverse');
-  console.log(' 10. 🎯 Shuttle +1x');
-  console.log(' 11. 🎯 Shuttle -1x');
-  
-  console.log('\nStatus Commands:');
-  console.log(' 12. 📊 Check Status');
-  console.log(' 13. 📈 Extended Status');
-  console.log(' 14. 🔍 Device Type');
-  console.log(' 15. 🚪 Exit');
-  
-  const readline = require('readline');
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-  });
-  
-  const askCommand = () => {
-    rl.question('\nEnter command number (1-15): ', async (answer) => {
-      switch (answer.trim()) {
-        case '1': await playVtr(path); break;
-        case '2': await pauseVtr(path); break;
-        case '3': await stopVtr(path); break;
-        case '4': await fastForwardVtr(path); break;
-        case '5': await rewindVtr(path); break;
-        case '6':
-          console.log('⚠️  Are you sure you want to record?');
-          rl.question('Type "YES" to confirm: ', async (confirm) => {
-            if (confirm === 'YES') await recordVtr(path);
-            else console.log('❌ Record cancelled');
-            askCommand();
-          });
-          return;
-        case '7': await ejectTape(path); break;
-        case '8': await jogForward(path); break;
-        case '9': await jogReverse(path); break;
-        case '10': await shuttlePlus1(path); break;
-        case '11': await shuttleMinus1(path); break;
-        case '12': await checkSingleVtr(path); break;
-        case '13': await getExtendedStatus(path); break;
-        case '14': await getDeviceType(path); break;
-        case '15':
-          console.log('👋 Exiting VTR control');
-          rl.close();
-          return;
-        default:
-          console.log('❌ Invalid command. Please enter 1-15.');
-          break;
-      }
-      askCommand();
-    });
-  };
-  
-  askCommand();
-}
-
-/**
- * Send raw command to VTR
- */
-async function sendRawCommand(path, commandString) {
-  console.log(`🔧 Sending raw command: ${commandString}`);
+  console.log('🎬 VTR Status Checker & Controller');
+  console.log('==================================');
   
   try {
-    // Parse hex command string
-    const commandBytes = commandString.split(' ').map(hex => parseInt(hex, 16));
-    const command = Buffer.from(commandBytes);
-    
-    console.log(`📤 Command bytes: ${command.toString('hex')}`);
-    console.log(`📤 Command length: ${command.length} bytes`);
-    console.log(`📤 Individual bytes: [${Array.from(command).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
-    
-    const response = await sendCommand(path, command, 3000);
-    
-    if (response && response.length > 0) {
-      console.log(`📥 Response: ${response.toString('hex')} (${response.length} bytes)`);
-      console.log(`📥 Individual bytes: [${Array.from(response).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
-      console.log(`📥 ASCII: "${response.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}"`);
-      console.log(`📥 Binary: ${Array.from(response).map(b => b.toString(2).padStart(8, '0')).join(' ')}`);
-      
-      // Analyze the response
-      analyzeResponse(response, 'Raw Command');
-    } else {
-      console.log('❌ No response received');
+    switch (command) {
+      case '--scan':
+        await scanAllVtrs();
+        break;
+        
+      case '--play':
+        if (!port) {
+          console.log('❌ Port required for --play');
+          return;
+        }
+        console.log(`📤 Sending PLAY command to ${port}...`);
+        await playVtr(port);
+        break;
+        
+      case '--stop':
+        if (!port) {
+          console.log('❌ Port required for --stop');
+          return;
+        }
+        console.log(`📤 Sending STOP command to ${port}...`);
+        await stopVtr(port);
+        break;
+        
+      case '--pause':
+        if (!port) {
+          console.log('❌ Port required for --pause');
+          return;
+        }
+        console.log(`📤 Sending PAUSE command to ${port}...`);
+        await pauseVtr(port);
+        break;
+        
+      case '--control':
+        if (!port) {
+          console.log('❌ Port required for --control');
+          return;
+        }
+        await controlVtr(port);
+        break;
+        
+      case '--raw':
+        if (!port || !rawCommand) {
+          console.log('❌ Port and command required for --raw');
+          console.log('Example: --raw /dev/ttyRP11 "20 01 21"');
+          return;
+        }
+        await sendRawCommand(port, rawCommand);
+        break;
+        
+      default:
+        // Assume it's a port path for status check
+        await checkSingleVtr(command);
+        break;
     }
-    
   } catch (error) {
-    console.log(`❌ Raw command failed: ${error.message}`);
+    console.error('❌ Error:', error.message);
+    process.exit(1);
   }
 }
 
