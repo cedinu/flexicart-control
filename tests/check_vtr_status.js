@@ -105,60 +105,44 @@ const VTR_COMMANDS_SIMPLE = {
 };
 
 /**
- * Send a control command to VTR
- * @param {string} path - VTR port path
- * @param {Buffer} command - Command buffer
- * @param {string} commandName - Human readable command name
+ * Send a transport command to VTR and interpret the response
+ * @param {string} path - Serial port path (e.g., '/dev/ttyRP11')
+ * @param {Buffer} command - Command buffer to send
+ * @param {string} commandName - Human-readable command name for logging
+ * @returns {Promise<VtrCommandResult>} Result object with success status and interpreted response
+ * @throws {VtrError} When path or command is invalid
+ * 
+ * @example
+ * const result = await sendVtrCommand('/dev/ttyRP11', Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
+ * if (result.success) {
+ *   console.log(`VTR is now in ${result.mode} mode`);
+ * }
  */
 async function sendVtrCommand(path, command, commandName) {
-  console.log(`📤 Sending ${commandName} command to ${path}...`);
-  
   try {
     const response = await sendCommand(path, command, 3000);
     
-    if (response && response.length > 0) {
-      console.log(`✅ ${commandName} command sent successfully`);
-      console.log(`📥 Response: ${response.toString('hex')} (${response.length} bytes)`);
-      
-      // REMOVE THIS SECTION that calls getVtrStatus:
-      // await new Promise(resolve => setTimeout(resolve, 500));
-      // const status = await getVtrStatus(path);
-      // console.log(`📊 New status: ${status.mode.toUpperCase()} - TC: ${status.timecode}`);
-      
-      // REPLACE WITH DIRECT RESPONSE INTERPRETATION:
-      const responseHex = response.toString('hex');
-      let detectedMode = 'UNKNOWN';
-      let timecode = '00:00:00:00'; // HDW doesn't provide timecode in basic responses
-      
-      // Interpret your actual HDW response patterns
-      if (responseHex.startsWith('f77e')) {
-        detectedMode = 'STOP';
-      } else if (responseHex.startsWith('d7bd')) {
-        detectedMode = 'PLAY';
-      } else if (responseHex.startsWith('f79f')) {
-        detectedMode = 'FAST_FORWARD';
-      } else if (responseHex.startsWith('f7f7')) {
-        detectedMode = 'REWIND';
-      } else if (responseHex.startsWith('6f77')) {
-        if (responseHex.includes('3e')) {
-          detectedMode = 'JOG_STILL';
-        } else {
-          detectedMode = 'JOG_FORWARD';
-        }
-      } else if (responseHex.startsWith('6f6f')) {
-        detectedMode = 'JOG_REVERSE';
-      }
-      
-      console.log(`📊 New status: ${detectedMode} - TC: ${timecode}`);
-      
-      return true;
-    } else {
-      console.log(`⚠️  ${commandName} command sent but no response received`);
-      return false;
+    if (!response || response.length === 0) {
+      throw new VtrError(`No response received for ${commandName}`, 'NO_RESPONSE', path);
     }
+    
+    return {
+      success: true,
+      response,
+      mode: interpretVtrResponse(response.toString('hex')),
+      timestamp: new Date().toISOString()
+    };
+    
   } catch (error) {
-    console.log(`❌ ${commandName} command failed: ${error.message}`);
-    return false;
+    const vtrError = error instanceof VtrError ? error : 
+      new VtrError(`${commandName} failed: ${error.message}`, 'COMMAND_FAILED', path);
+    
+    console.log(`❌ ${vtrError.message}`);
+    return {
+      success: false,
+      error: vtrError,
+      timestamp: new Date().toISOString()
+    };
   }
 }
 
@@ -746,6 +730,21 @@ async function testSimpleCommands(path) {
  * @param {string} commandString - Hex command string (e.g., "20 01 21")
  */
 async function sendRawCommand(path, commandString) {
+  // Add validation
+  if (!path || typeof path !== 'string') {
+    throw new VtrError('Invalid port path provided', 'INVALID_PATH');
+  }
+  
+  if (!commandString || typeof commandString !== 'string') {
+    throw new VtrError('Invalid command string provided', 'INVALID_COMMAND');
+  }
+  
+  // Validate hex format
+  const hexPattern = /^[\da-fA-F\s]+$/;
+  if (!hexPattern.test(commandString.trim())) {
+    throw new VtrError('Command must be in hex format (e.g., "20 01 21")', 'INVALID_HEX');
+  }
+  
   console.log(`🔧 Sending raw command: ${commandString}`);
   
   try {
@@ -1308,6 +1307,41 @@ async function batchControlVtrs(ports, command) {
   return results;
 }
 
+// New SONY_9PIN_COMMANDS object
+const SONY_9PIN_COMMANDS = {
+  transport: {
+    STOP: { bytes: [0x20, 0x00], checksum: 0x20, description: 'Stop transport' },
+    PLAY: { bytes: [0x20, 0x01], checksum: 0x21, description: 'Play forward' },
+    FAST_FORWARD: { bytes: [0x20, 0x10], checksum: 0x30, description: 'Fast forward' },
+    REWIND: { bytes: [0x20, 0x20], checksum: 0x40, description: 'Rewind' },
+  },
+  
+  variable: {
+    JOG_FORWARD_STILL: { bytes: [0x21, 0x11, 0x00], checksum: 0x30, description: 'Jog forward still' },
+    JOG_FORWARD_SLOW: { bytes: [0x21, 0x11, 0x20], checksum: 0x10, description: 'Jog forward slow' },
+    JOG_FORWARD_NORMAL: { bytes: [0x21, 0x11, 0x40], checksum: 0x30, description: 'Jog forward normal' },
+  },
+  
+  system: {
+    LOCAL_DISABLE: { bytes: [0x00, 0x0C], checksum: 0x0C, description: 'Disable local control' },
+    DEVICE_TYPE: { bytes: [0x00, 0x11], checksum: 0x11, description: 'Request device type' },
+    STATUS: { bytes: [0x61, 0x20], checksum: 0x41, description: 'Request status' },
+  }
+};
+
+function getCommandBuffer(category, command) {
+  const cmd = SONY_9PIN_COMMANDS[category]?.[command];
+  if (!cmd) {
+    throw new VtrError(`Unknown command: ${category}.${command}`, 'UNKNOWN_COMMAND');
+  }
+  
+  return Buffer.from([...cmd.bytes, cmd.checksum]);
+}
+
+// Usage:
+const playCommand = getCommandBuffer('transport', 'PLAY');
+const statusCommand = getCommandBuffer('system', 'STATUS');
+
 /*
  * Sony 9-pin Variable Speed Data Values:
  * SPEED = 0x00 (0)    = STILL
@@ -1374,5 +1408,55 @@ module.exports = {
   testCommandFormats,
   testSimpleCommands,
   decodeVtrStatusResponse,
-  debugStatusResponses
+  debugStatusResponses,
+  SONY_9PIN_COMMANDS,
+  getCommandBuffer
 };
+
+class VtrLogger {
+  static info(message, data = {}) {
+    console.log(`[INFO] ${message}`, data.path ? `(${data.path})` : '', data.extra || '');
+  }
+  
+  static success(message, data = {}) {
+    console.log(`[SUCCESS] ✅ ${message}`, data.path ? `(${data.path})` : '', data.extra || '');
+  }
+  
+  static error(message, data = {}) {
+    console.log(`[ERROR] ❌ ${message}`, data.path ? `(${data.path})` : '', data.error || '');
+  }
+  
+  static command(command, path, direction = 'out') {
+    const arrow = direction === 'out' ? '📤' : '📥';
+    console.log(`[COMMAND] ${arrow} ${command} → ${path}`);
+  }
+  
+  static response(response, path) {
+    console.log(`[RESPONSE] 📥 ${path}: ${response.toString('hex')} (${response.length} bytes)`);
+  }
+}
+
+class VtrStateManager {
+  constructor() {
+    this.portStates = new Map();
+  }
+  
+  updateTransportState(path, response, command, timestamp = Date.now()) {
+    this.portStates.set(path, {
+      lastResponse: response,
+      lastCommand: command,
+      timestamp,
+      mode: interpretVtrResponse(response.toString('hex'))
+    });
+  }
+  
+  getPortState(path) {
+    return this.portStates.get(path) || null;
+  }
+  
+  clearPortState(path) {
+    this.portStates.delete(path);
+  }
+}
+
+const vtrState = new VtrStateManager();
