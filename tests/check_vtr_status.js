@@ -335,11 +335,13 @@ async function getVtrTimecode(path) {
 }
 
 // Update checkSingleVtr to get real timecode
+// Update checkSingleVtr function to use the local version
 async function checkSingleVtr(path) {
   console.log(`\n🔍 Checking VTR at ${path}...`);
   
   try {
-    const status = await getVtrStatus(path);
+    // Use your local enhanced version instead of imported one
+    const status = await getVtrStatusLocal(path);
     
     if (status.error) {
       console.log(`❌ Error: ${status.error}`);
@@ -1547,11 +1549,11 @@ async function getVtrStatus(path) {
     const timecode = '00:00:00:00'; // HDW doesn't provide timecode in basic status
     
     // Use stored transport state if available and recent (within 30 seconds)
-    if (global.lastTransportResponse && global.lastTransportTime && 
-        (Date.now() - global.lastTransportTime < 30000)) {
-      const lastResponseHex = global.lastTransportResponse.toString('hex');
+    const storedState = getStoredTransportState(path);
+    if (storedState && (Date.now() - storedState.timestamp < 30000)) {
+      const lastResponseHex = storedState.lastResponse.toString('hex');
       mode = interpretVtrResponse(lastResponseHex);
-      console.log(`📊 Using cached transport state: ${mode} (from ${global.lastTransportCommand})`);
+      console.log(`📊 Using cached transport state: ${mode} (from ${storedState.lastCommand})`);
     } else {
       // Parse current status response for basic state
       const responseHex = response.toString('hex');
