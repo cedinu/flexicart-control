@@ -921,6 +921,16 @@ async function controlVtr(path) {
           case 'debug-status':
             await debugStatusResponses(path);
             break;
+          case 'tc-test':
+            await testAllTimecodeCommands(path);
+            break;
+          case 'tc-movement':
+            await testTimecodeMovement(path);
+            break;
+          case 'tc-detailed':
+            const detailed = await getDetailedTimecode(path);
+            console.log(`📊 Detailed timecode: ${detailed}`);
+            break;
           case 'quit':
           case 'exit':
             rl.close();
@@ -1606,4 +1616,218 @@ async function getVtrStatusNonDestructive(path) {
       tape: false 
     };
   }
+}
+
+/**
+ * Test comprehensive timecode retrieval methods for HDW VTR
+ * @param {string} path - VTR port path
+ */
+async function testAllTimecodeCommands(path) {
+  console.log('🕐 Testing all Sony 9-pin timecode commands...\n');
+  
+  const timecodeCommands = [
+    // Standard Sony 9-pin timecode commands
+    { name: 'Current Time Data', cmd: Buffer.from([0x74, 0x20, 0x54]), format: 'Standard TC request' },
+    { name: 'LTC Time Data', cmd: Buffer.from([0x78, 0x20, 0x58]), format: 'LTC timecode' },
+    { name: 'VITC Time Data', cmd: Buffer.from([0x79, 0x20, 0x59]), format: 'VITC timecode' },
+    { name: 'Timer 1', cmd: Buffer.from([0x75, 0x20, 0x55]), format: 'Timer 1 data' },
+    { name: 'Timer 2', cmd: Buffer.from([0x76, 0x20, 0x56]), format: 'Timer 2 data' },
+    { name: 'User Bits', cmd: Buffer.from([0x77, 0x20, 0x57]), format: 'User bits data' },
+    
+    // Extended timecode commands
+    { name: 'TC Generator', cmd: Buffer.from([0x7A, 0x20, 0x5A]), format: 'TC generator data' },
+    { name: 'UB Generator', cmd: Buffer.from([0x7B, 0x20, 0x5B]), format: 'UB generator data' },
+    
+    // Alternative status with timecode
+    { name: 'Extended Status', cmd: Buffer.from([0x60, 0x20, 0x40]), format: 'Extended status' },
+    { name: 'Full Status', cmd: Buffer.from([0x63, 0x20, 0x43]), format: 'Full status block' },
+    
+    // HDW-specific commands (if any)
+    { name: 'HDW Position', cmd: Buffer.from([0x71, 0x20, 0x51]), format: 'Position data' },
+    { name: 'Search Data', cmd: Buffer.from([0x72, 0x20, 0x52]), format: 'Search position' }
+  ];
+  
+  for (const tcCmd of timecodeCommands) {
+    try {
+      console.log(`📤 Testing ${tcCmd.name} (${tcCmd.format})...`);
+      console.log(`   Command: ${tcCmd.cmd.toString('hex')}`);
+      
+      const response = await sendCommand(path, tcCmd.cmd, 3000);
+      
+      if (response && response.length > 0) {
+        console.log(`✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        console.log(`   Bytes: [${Array.from(response).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ')}]`);
+        console.log(`   ASCII: "${response.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}" `);
+        
+        // Try to decode if it looks like timecode
+        if (response.length >= 4) {
+          const decoded = decodeTimecodeResponse(response, tcCmd.name);
+          if (decoded) {
+            console.log(`🕐 Decoded timecode: ${decoded}`);
+          }
+        }
+      } else {
+        console.log(`❌ No response`);
+      }
+      
+      console.log(''); // Empty line for readability
+      
+    } catch (error) {
+      console.log(`❌ Error: ${error.message}\n`);
+    }
+  }
+}
+
+/**
+ * Decode timecode response based on Sony 9-pin protocol variations
+ * @param {Buffer} response - Raw response buffer
+ * @param {string} commandName - Name of command that generated response
+ * @returns {string|null} Decoded timecode or null if not valid
+ */
+function decodeTimecodeResponse(response, commandName) {
+  if (!response || response.length < 3) return null;
+  
+  const bytes = Array.from(response);
+  const hex = response.toString('hex');
+  
+  console.log(`🔍 Analyzing ${commandName} response pattern:`);
+  
+  // Check for "no timecode" patterns
+  if (hex === '917700' || hex === '919100' || hex === '000000') {
+    console.log(`   ⚠️  Pattern indicates no timecode available`);
+    return null;
+  }
+  
+  // Try different Sony 9-pin timecode formats
+  
+  // Format 1: Standard BCD timecode (4+ bytes)
+  if (response.length >= 4) {
+    try {
+      const hours = bcdToBin(bytes[0]);
+      const minutes = bcdToBin(bytes[1]);
+      const seconds = bcdToBin(bytes[2]);
+      const frames = bcdToBin(bytes[3]);
+      
+      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
+        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+        console.log(`   ✅ BCD format: ${timecode}`);
+        return timecode;
+      }
+    } catch (e) {
+      // BCD decode failed, try other formats
+    }
+  }
+  
+  // Format 2: Binary timecode
+  if (response.length >= 4) {
+    const hours = bytes[0];
+    const minutes = bytes[1];
+    const seconds = bytes[2];
+    const frames = bytes[3];
+    
+    if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
+      const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+      console.log(`   ✅ Binary format: ${timecode}`);
+      return timecode;
+    }
+  }
+  
+  // Format 3: Packed timecode (Sony specific)
+  if (response.length >= 3) {
+    try {
+      const packed = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
+      const frames = packed & 0x3F;
+      const seconds = (packed >> 6) & 0x3F;
+      const minutes = (packed >> 12) & 0x3F;
+      const hours = (packed >> 18) & 0x1F;
+      
+      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
+        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+        console.log(`   ✅ Packed format: ${timecode}`);
+        return timecode;
+      }
+    } catch (e) {
+      // Packed decode failed
+    }
+  }
+  
+  console.log(`   ❓ Unknown format - Raw: ${hex}`);
+  return null;
+}
+
+/**
+ * Convert BCD (Binary Coded Decimal) to binary
+ * @param {number} bcd - BCD byte
+ * @returns {number} Binary value
+ */
+function bcdToBin(bcd) {
+  return ((bcd >> 4) * 10) + (bcd & 0x0F);
+}
+
+/**
+ * Test timecode during transport to see if it updates
+ * @param {string} path - VTR port path
+ */
+async function testTimecodeMovement(path) {
+  console.log('🎬 Testing timecode during transport...\n');
+  
+  try {
+    // Step 1: Stop and get baseline
+    console.log('📤 Sending STOP...');
+    await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    console.log('📤 Getting baseline timecode...');
+    const baselineTC = await getDetailedTimecode(path);
+    console.log(`📊 Baseline: ${baselineTC}\n`);
+    
+    // Step 2: Start PLAY and monitor timecode
+    console.log('📤 Starting PLAY...');
+    await sendVtrCommand(path, Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
+    
+    // Sample timecode multiple times during play
+    for (let i = 0; i < 5; i++) {
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+      const currentTC = await getDetailedTimecode(path);
+      console.log(`📊 Play sample ${i + 1}: ${currentTC}`);
+    }
+    
+    // Step 3: Stop and get final timecode
+    console.log('\n📤 Stopping...');
+    await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const finalTC = await getDetailedTimecode(path);
+    console.log(`📊 Final: ${finalTC}`);
+    
+  } catch (error) {
+    console.log(`❌ Test failed: ${error.message}`);
+  }
+}
+
+/**
+ * Get detailed timecode from multiple sources
+ * @param {string} path - VTR port path  
+ * @returns {string} Detailed timecode info
+ */
+async function getDetailedTimecode(path) {
+  const commands = [
+    { name: 'Standard', cmd: Buffer.from([0x74, 0x20, 0x54]) },
+    { name: 'LTC', cmd: Buffer.from([0x78, 0x20, 0x58]) },
+    { name: 'Timer1', cmd: Buffer.from([0x75, 0x20, 0x55]) }
+  ];
+  
+  const results = [];
+  
+  for (const cmd of commands) {
+    try {
+      const response = await sendCommand(path, cmd.cmd, 1000);
+      const decoded = decodeTimecodeResponse(response, cmd.name);
+      results.push(`${cmd.name}:${decoded || 'N/A'}`);
+    } catch (e) {
+      results.push(`${cmd.name}:ERROR`);
+    }
+  }
+  
+  return results.join(' | ');
 }
