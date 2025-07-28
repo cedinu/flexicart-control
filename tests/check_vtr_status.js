@@ -1499,14 +1499,16 @@ module.exports = {
   debugStatusResponses,
   SONY_9PIN_COMMANDS,
   getCommandBuffer,
+  // Timecode functions
   testAllTimecodeCommands,
-  testTimecodeMovement,
+  testTimecodeMovement,        // ← This was missing!
   getDetailedTimecode,
   decodeTimecodeResponse,
   testTimecodeAdvancement,
   getComprehensiveTimecode,
   testTapeTimecodeCommands,
-  decodeTapeTimecode
+  decodeTapeTimecode,
+  bcdToBin                     // ← Add this helper function too
 };
 
 class VtrError extends Error {
@@ -1873,30 +1875,35 @@ function decodeTapeTimecode(response, commandName) {
   const bytes = Array.from(response);
   const hex = response.toString('hex');
   
-  console.log(`🔍 Analyzing ${commandName} response:`);
+  console.log(`🔍 Analyzing ${commandName} response pattern:`);
   
-  // Try different tape timecode formats
+  // Check for "no timecode" patterns
+  if (hex === '917700' || hex === '919100' || hex === '000000') {
+    console.log(`   ⚠️  Pattern indicates no timecode available`);
+    return null;
+  }
   
-  // Format 1: Direct BCD format (common for tape readers)
+  // Try different Sony 9-pin timecode formats
+  
+  // Format 1: Standard BCD timecode (4+ bytes)
   if (response.length >= 4) {
     try {
-      // Standard BCD: each nibble is a digit
-      const hours = ((bytes[0] >> 4) * 10) + (bytes[0] & 0x0F);
-      const minutes = ((bytes[1] >> 4) * 10) + (bytes[1] & 0x0F);
-      const seconds = ((bytes[2] >> 4) * 10) + (bytes[2] & 0x0F);
-      const frames = ((bytes[3] >> 4) * 10) + (bytes[3] & 0x0F);
+      const hours = bcdToBin(bytes[0]);
+      const minutes = bcdToBin(bytes[1]);
+      const seconds = bcdToBin(bytes[2]);
+      const frames = bcdToBin(bytes[3]);
       
       if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
         const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-        console.log(`   ✅ BCD Tape format: ${timecode}`);
+        console.log(`   ✅ BCD format: ${timecode}`);
         return timecode;
       }
     } catch (e) {
-      // BCD decode failed
+      // BCD decode failed, try other formats
     }
   }
   
-  // Format 2: Binary tape counter format
+  // Format 2: Binary timecode
   if (response.length >= 4) {
     const hours = bytes[0];
     const minutes = bytes[1];
@@ -1905,26 +1912,23 @@ function decodeTapeTimecode(response, commandName) {
     
     if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
       const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-      console.log(`   ✅ Binary Tape format: ${timecode}`);
+      console.log(`   ✅ Binary format: ${timecode}`);
       return timecode;
     }
   }
   
-  // Format 3: HDW-specific packed format (different from LTC)
+  // Format 3: Packed timecode (Sony specific)
   if (response.length >= 3) {
     try {
-      // Try alternative bit arrangements for HDW tape counter
       const packed = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
+      const frames = packed & 0x3F;
+      const seconds = (packed >> 6) & 0x3F;
+      const minutes = (packed >> 12) & 0x3F;
+      const hours = (packed >> 18) & 0x1F;
       
-      // Alternative packing schemes
-      const frames_alt = (packed >> 0) & 0x3F;   // 6 bits
-      const seconds_alt = (packed >> 6) & 0x3F;  // 6 bits  
-      const minutes_alt = (packed >> 12) & 0x3F; // 6 bits
-      const hours_alt = (packed >> 18) & 0x1F;   // 5 bits
-      
-      if (hours_alt <= 23 && minutes_alt <= 59 && seconds_alt <= 59 && frames_alt <= 29) {
-        const timecode = `${hours_alt.toString().padStart(2, '0')}:${minutes_alt.toString().padStart(2, '0')}:${seconds_alt.toString().padStart(2, '0')}:${frames_alt.toString().padStart(2, '0')}`;
-        console.log(`   ✅ HDW Tape format: ${timecode}`);
+      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
+        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+        console.log(`   ✅ Packed format: ${timecode}`);
         return timecode;
       }
     } catch (e) {
@@ -1932,25 +1936,15 @@ function decodeTapeTimecode(response, commandName) {
     }
   }
   
-  // Format 4: Counter format (hours might be in different position)
-  if (response.length >= 5) {
-    try {
-      // Some VTRs put frame count first, then time
-      const frames = bytes[0];
-      const seconds = bytes[1];
-      const minutes = bytes[2]; 
-      const hours = bytes[3];
-      
-      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
-        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-        console.log(`   ✅ Counter format: ${timecode}`);
-        return timecode;
-      }
-    } catch (e) {
-      // Counter decode failed
-    }
-  }
-  
-  console.log(`   ❓ No valid tape timecode found - Raw: ${hex}`);
+  console.log(`   ❓ Unknown format - Raw: ${hex}`);
   return null;
+}
+
+/**
+ * Convert BCD (Binary Coded Decimal) to binary
+ * @param {number} bcd - BCD byte
+ * @returns {number} Binary value
+ */
+function bcdToBin(bcd) {
+  return ((bcd >> 4) * 10) + (bcd & 0x0F);
 }
