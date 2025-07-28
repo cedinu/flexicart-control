@@ -1620,5 +1620,6 @@ module.exports = {
   VTR_COMMANDS,
   VTR_COMMANDS_CORRECTED,
   testCommandFormats,
-  testSimpleCommands
+  testSimpleCommands,
+  decodeVtrStatusResponse
 };
