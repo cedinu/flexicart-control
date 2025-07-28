@@ -987,56 +987,79 @@ function decodeVtrStatusResponse(response, commandType) {
   console.log(`🔍 Decoding ${commandType} response:`);
   
   switch(commandType.toLowerCase()) {
+    case 'stop':
+      if (response.length >= 3) {
+        // Based on your "f7 7e f8" response
+        const status1 = response[0]; // 0xF7 = Transport status
+        const status2 = response[1]; // 0x7E = Mode status  
+        const status3 = response[2]; // 0xF8 = Additional status
+        
+        console.log(`   🛑 Transport Status: 0x${status1.toString(16)} (${status1})`);
+        console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
+        console.log(`   🎛️  Additional Status: 0x${status3.toString(16)} (${status3})`);
+        
+        // Decode transport bits (0xF7 = 11110111)
+        if (status1 & 0x80) console.log(`     - Status response active`);
+        if (status1 & 0x40) console.log(`     - Servo system active`);
+        if (status1 & 0x20) console.log(`     - Tape loaded`);
+        if (status1 & 0x10) console.log(`     - Transport ready`);
+        
+        return { mode: 'STOP', transport: status1, modeStatus: status2, additional: status3 };
+      }
+      break;
+      
     case 'play':
       if (response.length >= 2) {
-        const status1 = response[0]; // Transport status - MISSING!
-        const status2 = response[1]; // Mode status - MISSING!
+        // Based on your "d7 bd" response
+        const status1 = response[0]; // 0xD7 = Transport status
+        const status2 = response[1]; // 0xBD = Mode status
         
         console.log(`   🎮 Transport Status: 0x${status1.toString(16)} (${status1})`);
         console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
         
-        // Decode transport status bits
-        if (status1 & 0x80) console.log(`     - Play mode active`);
-        if (status1 & 0x40) console.log(`     - Servo locked`);
-        if (status1 & 0x20) console.log(`     - Tape threading`);
+        // Decode transport bits (0xD7 = 11010111)
+        if (status1 & 0x80) console.log(`     - Status response active`);
+        if (status1 & 0x40) console.log(`     - Play mode indication`);
+        if (status1 & 0x20) console.log(`     - Tape loaded`);
         if (status1 & 0x10) console.log(`     - Direction forward`);
         
         return { mode: 'PLAY', transport: status1, modeStatus: status2 };
       }
       break;
       
-    case 'stop':
-      if (response.length >= 3) {
-        const status1 = response[0]; // Transport status
-        const status2 = response[1]; // Mode status
-        const status3 = response[2]; // Additional status
-        
-        console.log(`   🛑 Transport Status: 0x${status1.toString(16)} (${status1})`);
-        console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
-        console.log(`   🎛️  Additional Status: 0x${status3.toString(16)} (${status3})`);
-        
-        return { mode: 'STOP', transport: status1, modeStatus: status2, additional: status3 };
-      }
-      break;
-      
     case 'device type':
       if (response.length >= 3) {
-        const deviceId = response[0];
-        const subType = response[1];
-        const version = response[2];
+        // Based on your "ba ba e0" response
+        const deviceId = response[0];   // 0xBA = HDW Series
+        const subType = response[1];    // 0xBA = Model variant
+        const version = response[2];    // 0xE0 = Version info
         
         console.log(`   📺 Device ID: 0x${deviceId.toString(16)} (${deviceId})`);
         console.log(`   📺 Sub-type: 0x${subType.toString(16)} (${subType})`);
-        console.log(`   📺 Version: 0x${version.toString(16)} (${version}`);
+        console.log(`   📺 Version: 0x${version.toString(16)} (${version})`);
         
         let deviceName = 'Unknown';
         if (deviceId === 0xBA) {
-          deviceName = 'HDW Series VTR';
+          deviceName = 'HDW Series VTR (confirmed working)';
         }
         
         console.log(`   📺 Identified as: ${deviceName}`);
-        
         return { deviceId, subType, version, deviceName, raw: response };
+      }
+      break;
+      
+    case 'status':
+      if (response.length >= 3) {
+        // Based on your "cf d7 00" response
+        const status1 = response[0]; // 0xCF = Transport status
+        const status2 = response[1]; // 0xD7 = Mode status
+        const status3 = response[2]; // 0x00 = Additional data
+        
+        console.log(`   📊 Status Byte 1: 0x${status1.toString(16)} (${status1})`);
+        console.log(`   📊 Status Byte 2: 0x${status2.toString(16)} (${status2})`);
+        console.log(`   📊 Status Byte 3: 0x${status3.toString(16)} (${status3})`);
+        
+        return { status1, status2, status3, raw: response };
       }
       break;
   }
