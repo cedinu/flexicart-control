@@ -984,6 +984,36 @@ async function testTapeTimecodeCommands(path) {
   }
 }
 
+// Add this function to check if tape is actually moving:
+async function checkTapeMovement(path) {
+  console.log('🎬 Testing if tape physically moves...');
+  
+  // Get initial position from multiple sources
+  const initialTC = await sendCommand(path, Buffer.from([0x78, 0x20, 0x58]), 1000);
+  const initialCTL = await sendCommand(path, Buffer.from([0x73, 0x20, 0x53]), 1000);
+  
+  console.log('📤 Starting PLAY for tape movement test...');
+  await playVtr(path);
+  
+  // Wait longer for mechanical movement
+  console.log('⏳ Waiting 10 seconds for tape movement...');
+  await new Promise(resolve => setTimeout(resolve, 10000));
+  
+  // Check position again
+  const newTC = await sendCommand(path, Buffer.from([0x78, 0x20, 0x58]), 1000);
+  const newCTL = await sendCommand(path, Buffer.from([0x73, 0x20, 0x53]), 1000);
+  
+  await stopVtr(path);
+  
+  const tcChanged = !initialTC.equals(newTC);
+  const ctlChanged = !initialCTL.equals(newCTL);
+  
+  console.log(`📊 TC Changed: ${tcChanged ? '✅ YES' : '❌ NO'}`);
+  console.log(`📊 CTL Changed: ${ctlChanged ? '✅ YES' : '❌ NO'}`);
+  
+  return tcChanged || ctlChanged;
+}
+
 // Export functions for use by other modules
 module.exports = {
   // Test-specific functions (keep these)
@@ -1186,5 +1216,36 @@ if (require.main === module) {
     console.error(error.stack);
     process.exit(1);
   });
+}
+
+// In vtr_cmds_status.js, update getVtrStatusNonDestructive:
+async function getVtrStatusNonDestructive(path) {
+  try {
+    const response = await sendCommand(path, VTR_STATUS_COMMANDS.STATUS, 3000);
+    
+    if (!response || response.length === 0) {
+      return { error: 'No response from VTR' };
+    }
+    
+    const status = decodeVtrStatusResponse(response);
+    
+    // Use your working LTC timecode function
+    try {
+      const ltcResponse = await sendCommand(path, Buffer.from([0x78, 0x20, 0x58]), 1000);
+      if (ltcResponse && ltcResponse.length >= 3) {
+        // Use your working decode function
+        const timecode = decodeTimecodeResponse(ltcResponse, 'LTC');
+        status.timecode = timecode || 'TC:NO_DECODE';
+      } else {
+        status.timecode = 'TC:NO_RESPONSE';
+      }
+    } catch (e) {
+      status.timecode = 'TC:ERROR';
+    }
+    
+    return status;
+  } catch (error) {
+    return { error: error.message };
+  }
 }
 
