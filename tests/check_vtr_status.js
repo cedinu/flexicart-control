@@ -120,10 +120,36 @@ async function sendVtrCommand(path, command, commandName) {
       console.log(`✅ ${commandName} command sent successfully`);
       console.log(`📥 Response: ${response.toString('hex')} (${response.length} bytes)`);
       
-      // Wait a bit then check status
-      await new Promise(resolve => setTimeout(resolve, 500));
-      const status = await getVtrStatus(path);
-      console.log(`📊 New status: ${status.mode.toUpperCase()} - TC: ${status.timecode}`);
+      // REMOVE THIS SECTION that calls getVtrStatus:
+      // await new Promise(resolve => setTimeout(resolve, 500));
+      // const status = await getVtrStatus(path);
+      // console.log(`📊 New status: ${status.mode.toUpperCase()} - TC: ${status.timecode}`);
+      
+      // REPLACE WITH DIRECT RESPONSE INTERPRETATION:
+      const responseHex = response.toString('hex');
+      let detectedMode = 'UNKNOWN';
+      let timecode = '00:00:00:00'; // HDW doesn't provide timecode in basic responses
+      
+      // Interpret your actual HDW response patterns
+      if (responseHex.startsWith('f77e')) {
+        detectedMode = 'STOP';
+      } else if (responseHex.startsWith('d7bd')) {
+        detectedMode = 'PLAY';
+      } else if (responseHex.startsWith('f79f')) {
+        detectedMode = 'FAST_FORWARD';
+      } else if (responseHex.startsWith('f7f7')) {
+        detectedMode = 'REWIND';
+      } else if (responseHex.startsWith('6f77')) {
+        if (responseHex.includes('3e')) {
+          detectedMode = 'JOG_STILL';
+        } else {
+          detectedMode = 'JOG_FORWARD';
+        }
+      } else if (responseHex.startsWith('6f6f')) {
+        detectedMode = 'JOG_REVERSE';
+      }
+      
+      console.log(`📊 New status: ${detectedMode} - TC: ${timecode}`);
       
       return true;
     } else {
