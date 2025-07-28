@@ -151,17 +151,121 @@ async function sendCommand(path, command, timeout = 5000) {
  * @throws {Error} If path is invalid or communication fails
  */
 async function getVtrStatus(path) {
-  if (!path || typeof path !== 'string') {
-    throw new Error('Invalid port path provided');
-  }
-
   try {
-    // Send Sony VTR status command (adjust command as needed for your VTR protocol)
-    const statusCommand = Buffer.from([0x88, 0x01, 0x61, 0xFF]); // Example Sony protocol
-    const buffer = await sendCommand(path, statusCommand);
-    return parseStatusData(buffer);
+    // Instead of using status query, send a transport command and interpret the response
+    // Use STOP command to get current transport status
+    const response = await sendCommand(path, Buffer.from([0x20, 0x00, 0x20]), 3000);
+    
+    if (!response || response.length === 0) {
+      return { error: 'No response from VTR', mode: 'UNKNOWN', timecode: '00:00:00:00', tape: false };
+    }
+    
+    // Parse HDW transport responses
+    let mode = 'UNKNOWN';
+    let tape = true; // Your VTR shows tape is likely IN based on responses
+    let timecode = '00:00:00:00'; // HDW doesn't provide timecode in basic status
+    
+    // Interpret transport response patterns
+    const responseHex = response.toString('hex');
+    
+    if (responseHex.startsWith('f77e')) {
+      // f7 7e xx pattern = STOP mode
+      mode = 'STOP';
+    } else if (responseHex.startsWith('d7bd')) {
+      // d7 bd pattern = PLAY mode  
+      mode = 'PLAY';
+    } else if (responseHex.startsWith('f79f')) {
+      // f7 9f pattern = FAST FORWARD mode
+      mode = 'FAST_FORWARD';
+    } else if (responseHex.startsWith('f7f7')) {
+      // f7 f7 pattern = REWIND mode
+      mode = 'REWIND';
+    } else if (responseHex.startsWith('6f77')) {
+      // 6f 77 pattern = JOG FORWARD mode
+      mode = 'JOG_FORWARD';
+    } else if (responseHex.startsWith('6f6f')) {
+      // 6f 6f pattern = JOG REVERSE mode
+      mode = 'JOG_REVERSE';
+    }
+    
+    // For HDW VTRs, tape presence is indicated by getting responses to commands
+    // If we get valid responses, tape is likely present and VTR is ready
+    tape = response.length > 0;
+    
+    return {
+      mode,
+      timecode,
+      tape,
+      speed: '1x',
+      raw: response,
+      responseHex: responseHex
+    };
+    
   } catch (error) {
-    throw new Error(`Failed to get VTR status: ${error.message}`);
+    return { 
+      error: error.message, 
+      mode: 'ERROR', 
+      timecode: '00:00:00:00', 
+      tape: false 
+    };
+  }
+}
+
+/**
+ * Enhanced HDW status detection
+ */
+async function getHdwTransportStatus(path) {
+  try {
+    // Send a harmless status command and interpret response
+    const response = await sendCommand(path, Buffer.from([0x61, 0x20, 0x41]), 3000);
+    
+    // Your HDW always returns cf d7 00 for status queries
+    // So we need to use the last transport command response instead
+    
+    // Store the last transport command response globally
+    if (global.lastTransportResponse) {
+      const lastResponse = global.lastTransportResponse;
+      const responseHex = lastResponse.toString('hex');
+      
+      let mode = 'STOP'; // Default
+      
+      if (responseHex.startsWith('d7bd')) {
+        mode = 'PLAY';
+      } else if (responseHex.startsWith('f79f')) {
+        mode = 'FAST_FORWARD';
+      } else if (responseHex.startsWith('f7f7')) {
+        mode = 'REWIND';
+      } else if (responseHex.startsWith('6f77')) {
+        mode = 'JOG_FORWARD';
+      } else if (responseHex.startsWith('6f6f')) {
+        mode = 'JOG_REVERSE';
+      }
+      
+      return {
+        mode,
+        timecode: '00:00:00:00', // HDW doesn't provide timecode in basic responses
+        tape: true, // VTR responds = tape present
+        speed: '1x',
+        raw: lastResponse
+      };
+    }
+    
+    // Fallback to basic status
+    return {
+      mode: 'STOP',
+      timecode: '00:00:00:00',
+      tape: true,
+      speed: '1x',
+      raw: response
+    };
+    
+  } catch (error) {
+    return { 
+      error: error.message, 
+      mode: 'ERROR', 
+      timecode: '00:00:00:00', 
+      tape: false 
+    };
   }
 }
 
@@ -259,6 +363,53 @@ async function registerPort(path) {
   }
 }
 
+// Update sendVtrCommand to store last transport response
+async function sendVtrCommand(path, command, commandName) {
+  console.log(`📤 Sending ${commandName} command to ${path}...`);
+  
+  try {
+    const response = await sendCommand(path, command, 3000);
+    
+    if (response && response.length > 0) {
+      console.log(`✅ ${commandName} command sent successfully`);
+      console.log(`📥 Response: ${response.toString('hex')} (${response.length} bytes)`);
+      
+      // Store last transport response globally for status detection
+      global.lastTransportResponse = response;
+      global.lastTransportCommand = commandName;
+      global.lastTransportTime = Date.now();
+      
+      // Interpret the response to determine actual mode
+      const responseHex = response.toString('hex');
+      let detectedMode = 'UNKNOWN';
+      
+      if (responseHex.startsWith('f77e')) {
+        detectedMode = 'STOP';
+      } else if (responseHex.startsWith('d7bd')) {
+        detectedMode = 'PLAY';
+      } else if (responseHex.startsWith('f79f')) {
+        detectedMode = 'FAST_FORWARD';
+      } else if (responseHex.startsWith('f7f7')) {
+        detectedMode = 'REWIND';
+      } else if (responseHex.startsWith('6f77')) {
+        detectedMode = 'JOG_FORWARD';
+      } else if (responseHex.startsWith('6f6f')) {
+        detectedMode = 'JOG_REVERSE';
+      }
+      
+      console.log(`📊 New status: ${detectedMode} - TC: 00:00:00:00`);
+      
+      return true;
+    } else {
+      console.log(`⚠️  ${commandName} command sent but no response received`);
+      return false;
+    }
+  } catch (error) {
+    console.log(`❌ ${commandName} command failed: ${error.message}`);
+    return false;
+  }
+}
+
 module.exports = {
   autoScanVtrs,
   autoScanFlexicarts,
@@ -270,5 +421,6 @@ module.exports = {
   registerPortForMonitoring,
   humanizeStatus,
   VTR_PORTS,
-  parseStatusData
+  parseStatusData,
+  sendVtrCommand // Export the new function
 };
