@@ -1554,6 +1554,19 @@ async function testSimpleCommands(path) {
   return workingCommands > 0;
 };
 
+// Example response decoder for timecode
+function decodeTimecodeResponse(bytes) {
+    if (bytes.length >= 4) {
+        const frames = bytes[0] & 0x3F;  // Lower 6 bits
+        const seconds = bytes[1] & 0x7F; // Lower 7 bits  
+        const minutes = bytes[2] & 0x7F; // Lower 7 bits
+        const hours = bytes[3] & 0x3F;   // Lower 6 bits
+        
+        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+    }
+    return "00:00:00:00";
+}
+
 /**
  * Call the main function if this file is run directly
  */
