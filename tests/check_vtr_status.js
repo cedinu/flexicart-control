@@ -32,14 +32,14 @@ function verifyChecksum(command) {
   return providedChecksum === calculatedChecksum;
 }
 
-// Replace the VTR_COMMANDS with the correct Sony 9-pin format
+// Find and update the VTR_COMMANDS definition
 const VTR_COMMANDS = {
   // CORRECT Transport Control Commands (Sony 9-pin standard)
   PLAY: Buffer.from([0x20, 0x01, 0x21]),           // PLAY = 20 01 (+ checksum)
   STOP: Buffer.from([0x20, 0x00, 0x20]),           // STOP = 20 00 (+ checksum)
   PAUSE: Buffer.from([0x20, 0x02, 0x22]),          // PAUSE = 20 02 (+ checksum)
   FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // FF = 20 10 (+ checksum)
-  REWIND: Buffer.from([0x20, 0x20, 0x00]),         // REW = 20 20 (+ checksum)
+  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // REW = 20 20 (+ checksum) CORRECTED!
   RECORD: Buffer.from([0x20, 0x04, 0x24]),         // RECORD = 20 04 (+ checksum)
   
   // Status commands (confirmed working)
@@ -55,14 +55,14 @@ const VTR_COMMANDS = {
   EXTENDED_STATUS: Buffer.from([0x61, 0x20, 0x41]) // Working format
 };
 
-// Also update VTR_COMMANDS_CORRECTED to match
+// Also update VTR_COMMANDS_CORRECTED
 const VTR_COMMANDS_CORRECTED = {
   // CORRECT Sony 9-pin transport commands
   PLAY: Buffer.from([0x20, 0x01, 0x21]),           // PLAY with checksum
   STOP: Buffer.from([0x20, 0x00, 0x20]),           // STOP with checksum  
   PAUSE: Buffer.from([0x20, 0x02, 0x22]),          // PAUSE with checksum
   FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // FF with checksum
-  REWIND: Buffer.from([0x20, 0x20, 0x00]),         // REW with checksum
+  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // REW with checksum CORRECTED!
   RECORD: Buffer.from([0x20, 0x04, 0x24]),         // RECORD with checksum
   
   // Status commands (confirmed working)
@@ -175,7 +175,7 @@ async function fastForwardVtr(path) {
  * @param {string} path - VTR port path
  */
 async function rewindVtr(path) {
-  return await sendVtrCommand(path, Buffer.from([0x20, 0x20, 0x00]), 'REWIND');
+  return await sendVtrCommand(path, Buffer.from([0x20, 0x20, 0x40]), 'REWIND'); // CORRECTED checksum!
 }
 
 /**
