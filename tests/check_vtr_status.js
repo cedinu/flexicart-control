@@ -771,235 +771,37 @@ async function controlVtr(path) {
 }
 
 /**
- * Batch control multiple VTRs
- * @param {Array} paths - Array of VTR port paths
- * @param {string} command - Command to send (play, pause, stop)
+ * Send raw command to VTR
  */
-async function batchControlVtrs(paths, command) {
-  console.log(`🎬 Sending ${command.toUpperCase()} to ${paths.length} VTRs...`);
+async function sendRawCommand(path, commandString) {
+  console.log(`🔧 Sending raw command: ${commandString}`);
   
-  const commandMap = {
-    'play': playVtr,
-    'pause': pauseVtr,
-    'stop': stopVtr,
-    'ff': fastForwardVtr,
-    'rew': rewindVtr
-  };
-  
-  const commandFunction = commandMap[command.toLowerCase()];
-  if (!commandFunction) {
-    console.log(`❌ Unknown command: ${command}`);
-    return;
-  }
-  
-  const results = [];
-  for (let i = 0; i < paths.length; i++) {
-    const path = paths[i];
-    console.log(`\n📺 VTR ${i + 1}/${paths.length} (${path})`);
-    const success = await commandFunction(path);
-    results.push({ path, success });
+  try {
+    // Parse hex command string
+    const commandBytes = commandString.split(' ').map(hex => parseInt(hex, 16));
+    const command = Buffer.from(commandBytes);
     
-    // Small delay between commands
-    if (i < paths.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
-  }
-  
-  // Summary
-  console.log(`\n📋 Batch ${command.toUpperCase()} Summary:`);
-  results.forEach((result, index) => {
-    const status = result.success ? '✅' : '❌';
-    console.log(`   ${status} VTR ${index + 1} (${result.path})`);
-  });
-}
-
-/**
- * Test VTR commands
- */
-async function testVtrCommands(path) {
-  console.log(`🧪 Testing VTR commands on ${path}`);
-  
-  const commands = [
-    { name: 'Status', cmd: VTR_COMMANDS.STATUS },
-    { name: 'Play', cmd: VTR_COMMANDS.PLAY },
-    { name: 'Pause', cmd: VTR_COMMANDS.PAUSE },
-    { name: 'Stop', cmd: VTR_COMMANDS.STOP },
-    { name: 'Timecode', cmd: VTR_COMMANDS.TIMECODE }
-  ];
-  
-  for (const { name, cmd } of commands) {
-    try {
-      console.log(`\n📤 Sending ${name} command...`);
-      const response = await sendCommand(path, cmd, 3000);
+    console.log(`📤 Command bytes: ${command.toString('hex')}`);
+    console.log(`📤 Command length: ${command.length} bytes`);
+    console.log(`📤 Individual bytes: [${Array.from(command).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
+    
+    const response = await sendCommand(path, command, 3000);
+    
+    if (response && response.length > 0) {
       console.log(`📥 Response: ${response.toString('hex')} (${response.length} bytes)`);
+      console.log(`📥 Individual bytes: [${Array.from(response).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
+      console.log(`📥 ASCII: "${response.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}"`);
+      console.log(`📥 Binary: ${Array.from(response).map(b => b.toString(2).padStart(8, '0')).join(' ')}`);
       
-      // Wait between commands
-      await new Promise(resolve => setTimeout(resolve, 500));
-    } catch (error) {
-      console.log(`❌ ${name} failed: ${error.message}`);
+      // Analyze the response
+      analyzeResponse(response, 'Raw Command');
+    } else {
+      console.log('❌ No response received');
     }
+    
+  } catch (error) {
+    console.log(`❌ Raw command failed: ${error.message}`);
   }
-}
-
-/**
- * Enhanced response analysis with detailed byte breakdown
- */
-function analyzeResponse(response, commandName) {
-  if (!response || response.length === 0) {
-    console.log(`🔍 No response to analyze for ${commandName}`);
-    return;
-  }
-  
-  console.log(`🔍 Analyzing response for ${commandName}:`);
-  console.log(`   📊 Length: ${response.length} bytes`);
-  console.log(`   📊 Hex: ${response.toString('hex')}`);
-  console.log(`   📊 Bytes: [${Array.from(response).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
-  console.log(`   📊 Decimal: [${Array.from(response).join(', ')}]`);
-  console.log(`   📊 Binary: ${Array.from(response).map(b => b.toString(2).padStart(8, '0')).join(' ')}`);
-  
-  // Add decoder call for transport commands
-  if (commandName.toLowerCase().includes('raw command')) {
-    // Try to determine command type from response pattern
-    if (response.length === 2 && response[0] === 0xD7) {
-      console.log('\n🎮 Detected PLAY response pattern:');
-      decodeVtrStatusResponse(response, 'play');
-    } else if (response.length === 3 && response[0] === 0xF7 && response[1] === 0xF7) {
-      console.log('\n⏪ Detected REWIND response pattern:');
-      decodeVtrStatusResponse(response, 'rewind');
-    } else if (response.length === 3 && response[0] === 0xF7 && response[1] === 0x7E) {
-      console.log('\n🛑 Detected STOP response pattern:');
-      decodeVtrStatusResponse(response, 'stop');
-    } else if (response.length === 3 && response[0] === 0xBA) {
-      console.log('\n📺 Detected DEVICE TYPE response:');
-      decodeVtrStatusResponse(response, 'device type');
-    }
-  }
-  
-  // Existing analysis continues...
-}
-
-/**
- * Decode VTR status responses based on command type
- * @param {Buffer} response - VTR response buffer
- * @param {string} commandType - Type of command that generated the response
- * @returns {Object} Decoded status information
- */
-function decodeVtrStatusResponse(response, commandType) {
-  if (!response || response.length === 0) return null;
-  
-  console.log(`🔍 Decoding ${commandType} response:`);
-  
-  switch(commandType.toLowerCase()) {
-    case 'play':
-      if (response.length >= 2) {
-        const status1 = response[0]; // 0xD7 = 11010111
-        const status2 = response[1]; // 0xBD = 10111101
-        
-        console.log(`   🎮 HDW Play Status: 0x${status1.toString(16)} (${status1})`);
-        console.log(`   📊 HDW Mode Status: 0x${status2.toString(16)} (${status2})`);
-        
-        // HDW-specific bit decoding
-        if (status1 & 0x80) console.log(`     - Transport active`);
-        if (status1 & 0x40) console.log(`     - Play mode engaged`);
-        if (status1 & 0x20) console.log(`     - Servo locked`);
-        if (status1 & 0x10) console.log(`     - Forward direction`);
-        if (status1 & 0x08) console.log(`     - Tape moving`);
-        if (status1 & 0x04) console.log(`     - Speed control active`);
-        if (status1 & 0x02) console.log(`     - Audio monitoring`);
-        if (status1 & 0x01) console.log(`     - Video output active`);
-        
-        return { 
-          mode: 'PLAY', 
-          transport: status1, 
-          modeStatus: status2,
-          isPlaying: (status1 & 0x40) !== 0
-        };
-      }
-      break;
-      
-    case 'stop':
-      if (response.length >= 3) {
-        const status1 = response[0]; // 0xF7 = 11110111
-        const status2 = response[1]; // 0x7E = 01111110  
-        const status3 = response[2]; // 0xF8 = 11111000
-        
-        console.log(`   🛑 HDW Stop Status: 0x${status1.toString(16)} (${status1})`);
-        console.log(`   📊 HDW Transport: 0x${status2.toString(16)} (${status2})`);
-        console.log(`   🎛️  HDW System: 0x${status3.toString(16)} (${status3})`);
-        
-        // HDW stop mode decoding
-        if (status1 & 0x80) console.log(`     - System ready`);
-        if (status1 & 0x40) console.log(`     - Stop mode active`);
-        if (status1 & 0x20) console.log(`         - Servo standby`);
-        if (status1 & 0x10) console.log(`     - Tape threaded`);
-        
-        return { 
-          mode: 'STOP', 
-          transport: status1, 
-          system: status2, 
-          additional: status3,
-          isStopped: true
-        };
-      }
-      break;
-      
-    case 'rewind':
-      if (response.length >= 3) {
-        const status1 = response[0]; // 0xF7 = 11110111
-        const status2 = response[1]; // 0xF7 = 11110111
-        const status3 = response[2]; // 0x83 = 10000011
-        
-        console.log(`   ⏪ HDW Rewind Status: 0x${status1.toString(16)} (${status1})`);
-        console.log(`   📊 HDW Direction: 0x${status2.toString(16)} (${status2})`);
-        console.log(`   🎛️  HDW Speed: 0x${status3.toString(16)} (${status3})`);
-        
-        // HDW rewind mode decoding - notice status3 changed from F8 to 83!
-        if (status3 & 0x80) console.log(`     - High speed rewind active`);
-        if (status3 & 0x02) console.log(`     - Reverse direction confirmed`);
-        if (status3 & 0x01) console.log(`     - Tape movement detected`);
-        
-        return { 
-          mode: 'REWIND', 
-          transport: status1, 
-          direction: status2, 
-          speed: status3,
-          isRewinding: (status3 & 0x80) !== 0
-        };
-      }
-      break;
-      
-    case 'device type':
-      if (response.length >= 3) {
-        const deviceId = response[0];   // 0xBA = HDW Series
-        const subType = response[1];    // 0xBA = Subtype
-        const version = response[2];    // 0xFC = Version/Status
-        
-        console.log(`   📺 HDW Device ID: 0x${deviceId.toString(16)} (${deviceId})`);
-        console.log(`   📺 HDW Sub-type: 0x${subType.toString(16)} (${subType})`);
-        console.log(`   📺 HDW Version: 0x${version.toString(16)} (${version})`);
-        
-        let deviceModel = 'Unknown HDW';
-        if (deviceId === 0xBA) {
-          if (subType === 0xBA) {
-            deviceModel = 'Sony HDW-500/750/M2000 Series';
-          }
-        }
-        
-        console.log(`   📺 Identified: ${deviceModel}`);
-        
-        return { 
-          deviceId, 
-          subType, 
-          version, 
-          deviceModel, 
-          series: 'HDW',
-          raw: response 
-        };
-      }
-      break;
-  }
-  
-  return { raw: response };
 }
 
 /**
