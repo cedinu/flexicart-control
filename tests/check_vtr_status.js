@@ -801,7 +801,7 @@ async function testVtrCommands(path) {
 async function controlVtr(path) {
   console.log(`🎛️ Interactive VTR Control for ${path}`);
   console.log('=====================================');
-  console.log('Commands: play, stop, ff, rew, jog-fwd, jog-rev, jog-still, eject, status, quit');
+  console.log('Commands: play, stop, ff, rew, jog-fwd, jog-rev, jog-still, eject, status, debug-status, quit');
   
   const readline = require('readline');
   const rl = readline.createInterface({
@@ -844,12 +844,16 @@ async function controlVtr(path) {
           case 'status':
             await checkSingleVtr(path);
             break;
+          case 'debug':
+          case 'debug-status':
+            await debugStatusResponses(path);
+            break;
           case 'quit':
           case 'exit':
             rl.close();
             return;
           default:
-            console.log('Unknown command. Available: play, stop, ff, rew, jog-fwd, jog-rev, jog-still, eject, status, quit');
+            console.log('Unknown command. Available: play, stop, ff, rew, jog-fwd, jog-rev, jog-still, eject, status, debug-status, quit');
         }
       } catch (error) {
         console.log(`❌ Command failed: ${error.message}`);
