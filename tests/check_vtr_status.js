@@ -32,44 +32,31 @@ function verifyChecksum(command) {
   return providedChecksum === calculatedChecksum;
 }
 
-// Fix VTR_COMMANDS - Remove RECORD to avoid 20-02
+// Update VTR_COMMANDS with working 4-byte JOG commands
 const VTR_COMMANDS = {
-  // Device Control Commands (CMD1=20) - Standard HDW commands
-  STOP: Buffer.from([0x20, 0x00, 0x20]),           // 20-00 STOP + checksum ✅
-  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // 20-01 PLAY + checksum ✅
-  // RECORD: REMOVED - 20-02 is RECORD which we're avoiding
-  STANDBY_OFF: Buffer.from([0x20, 0x04, 0x24]),    // 20-04 STANDBY OFF (NOT RECORD!)
-  STANDBY_ON: Buffer.from([0x20, 0x05, 0x25]),     // 20-05 STANDBY ON
-  DMC_START: Buffer.from([0x20, 0x0D, 0x2D]),      // 20-0D DMC START
-  EJECT: Buffer.from([0x20, 0x0F, 0x2F]),          // 20-0F EJECT
-  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // 20-10 FAST FWD ✅
-  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // 20-20 REWIND ✅
+  // Device Control Commands (CMD1=20) - Working ✅
+  STOP: Buffer.from([0x20, 0x00, 0x20]),           // STOP ✅
+  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // PLAY ✅
+  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // FAST FWD ✅
+  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // REWIND ✅
   
-  // Variable speed commands (3-byte format) - CORRECTED checksums
-  JOG_FORWARD_SLOW: Buffer.from([0x21, 0x11, 0x30]),     // 0x21^0x11 = 0x30
-  JOG_FORWARD_NORMAL: Buffer.from([0x22, 0x11, 0x33]),   // 0x22^0x11 = 0x33
-  VAR_FORWARD_SLOW: Buffer.from([0x21, 0x12, 0x33]),     // 0x21^0x12 = 0x33
-  SHUTTLE_FORWARD_1X: Buffer.from([0x21, 0x13, 0x32]),   // 0x21^0x13 = 0x32
+  // Variable speed commands (4-byte format) - WORKING! ✅
+  JOG_FORWARD_STILL: Buffer.from([0x21, 0x11, 0x00, 0x30]),     // JOG FWD STILL ✅
+  JOG_FORWARD_SLOW: Buffer.from([0x21, 0x11, 0x20, 0x10]),      // JOG FWD SLOW ✅
+  JOG_FORWARD_NORMAL: Buffer.from([0x21, 0x11, 0x40, 0x30]),    // JOG FWD NORMAL ✅
   
-  JOG_REVERSE_SLOW: Buffer.from([0x21, 0x21, 0x00]),     // 0x21^0x21 = 0x00
-  JOG_REVERSE_NORMAL: Buffer.from([0x22, 0x21, 0x03]),   // 0x22^0x21 = 0x03
-  VAR_REVERSE_SLOW: Buffer.from([0x21, 0x22, 0x03]),     // 0x21^0x22 = 0x03
-  SHUTTLE_REVERSE_1X: Buffer.from([0x21, 0x23, 0x02]),   // 0x21^0x23 = 0x02
+  JOG_REVERSE_SLOW: Buffer.from([0x21, 0x21, 0x20, 0x00]),      // JOG REV SLOW ✅
+  JOG_REVERSE_NORMAL: Buffer.from([0x21, 0x21, 0x40, 0x20]),    // JOG REV NORMAL ✅
   
-  // System Commands
-  LOCAL_DISABLE: Buffer.from([0x00, 0x0C, 0x0C]),  // 00-0C LOCAL DISABLE ✅
-  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // 00-11 DEVICE TYPE REQUEST ✅
-  LOCAL_ENABLE: Buffer.from([0x00, 0x1D, 0x1D]),   // 00-1D LOCAL ENABLE
+  // System Commands - Working ✅
+  LOCAL_DISABLE: Buffer.from([0x00, 0x0C, 0x0C]),  // LOCAL DISABLE ✅
+  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // DEVICE TYPE ✅
+  LOCAL_ENABLE: Buffer.from([0x00, 0x1D, 0x1D]),   // LOCAL ENABLE
   
-  // Status Commands
-  STATUS_SENSE: Buffer.from([0x61, 0x0A, 0x6B]),   // 61-0A STATUS SENSE
-  POSITION_SENSE: Buffer.from([0x61, 0x20, 0x41]), // 61-20 POSITION SENSE ✅
-  TIMER_MODE_SENSE: Buffer.from([0x74, 0x00, 0x74]), // 74-00 TIMER MODE SENSE
-  
-  // Alternative commands that work
-  STATUS: Buffer.from([0x61, 0x20, 0x41]),         // Same as POSITION_SENSE ✅
-  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // Timer data with position ✅
-  EXTENDED_STATUS: Buffer.from([0x61, 0x20, 0x41]) // Same as STATUS
+  // Status Commands - Working ✅
+  STATUS: Buffer.from([0x61, 0x20, 0x41]),         // STATUS ✅
+  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // TIMECODE
+  EXTENDED_STATUS: Buffer.from([0x61, 0x20, 0x41]) // STATUS ✅
 };
 
 // Also update VTR_COMMANDS_CORRECTED
@@ -221,6 +208,18 @@ async function jogForward(path) {
 
 async function jogReverse(path) {
   return await sendVtrCommand(path, VTR_COMMANDS.JOG_REVERSE_SLOW, 'JOG REVERSE SLOW');
+}
+
+async function jogForwardFast(path) {
+  return await sendVtrCommand(path, VTR_COMMANDS.JOG_FORWARD_NORMAL, 'JOG FORWARD NORMAL');
+}
+
+async function jogReverseFast(path) {
+  return await sendVtrCommand(path, VTR_COMMANDS.JOG_REVERSE_NORMAL, 'JOG REVERSE NORMAL');
+}
+
+async function jogStill(path) {
+  return await sendVtrCommand(path, VTR_COMMANDS.JOG_FORWARD_STILL, 'JOG STILL');
 }
 
 async function shuttlePlus1(path) {
@@ -1060,6 +1059,29 @@ function decodeVtrStatusResponse(response, commandType) {
         console.log(`   📊 Status Byte 3: 0x${status3.toString(16)} (${status3})`);
         
         return { status1, status2, status3, raw: response };
+      }
+      break;
+      
+    case 'jog forward':
+    case 'jog reverse':
+    case 'jog':
+      if (response.length >= 4) {
+        // Based on your "6f 77 xx xx" responses
+        const status1 = response[0]; // 0x6F = JOG status indicator
+        const status2 = response[1]; // 0x77 = Direction/mode
+        const status3 = response[2]; // Variable speed data
+        const status4 = response[3]; // Additional speed data
+        
+        console.log(`   🎮 JOG Status 1: 0x${status1.toString(16)} (${status1})`);
+        console.log(`   🎮 JOG Status 2: 0x${status2.toString(16)} (${status2})`);
+        console.log(`   🎮 Speed Data 1: 0x${status3.toString(16)} (${status3})`);
+        console.log(`   🎮 Speed Data 2: 0x${status4.toString(16)} (${status4})`);
+        
+        // Determine direction from status2
+        const direction = status2 === 0x77 ? 'FORWARD' : (status2 === 0x6F ? 'REVERSE' : 'UNKNOWN');
+        console.log(`   🎮 JOG Direction: ${direction}`);
+        
+        return { mode: 'JOG', direction, status1, status2, status3, status4, raw: response };
       }
       break;
   }
