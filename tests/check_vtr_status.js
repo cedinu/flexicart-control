@@ -1141,6 +1141,105 @@ function decodeVtrStatusResponse(response, commandType) {
   return { raw: response };
 }
 
+// Add this function to debug HDW status responses
+async function debugStatusResponses(path) {
+  console.log(`🩺 Debugging HDW status responses for ${path}...`);
+  
+  const statusCommands = [
+    { name: 'Basic Status', cmd: Buffer.from([0x61, 0x20, 0x41]) },
+    { name: 'Timecode', cmd: Buffer.from([0x74, 0x20, 0x54]) },
+    { name: 'Timer Status', cmd: Buffer.from([0x75, 0x20, 0x55]) }
+  ];
+  
+  for (const cmd of statusCommands) {
+    try {
+      console.log(`\n📤 Testing ${cmd.name}...`);
+      const response = await sendCommand(path, cmd.cmd, 3000);
+      console.log(`📥 ${cmd.name} Response: ${response.toString('hex')} (${response.length} bytes)`);
+      
+      // Decode the response in detail
+      if (response.length >= 3) {
+        const byte1 = response[0];
+        const byte2 = response[1];
+        const byte3 = response[2];
+        
+        console.log(`   Byte 1: 0x${byte1.toString(16)} (${byte1}) Binary: ${byte1.toString(2).padStart(8, '0')}`);
+        console.log(`   Byte 2: 0x${byte2.toString(16)} (${byte2}) Binary: ${byte2.toString(2).padStart(8, '0')}`);
+        console.log(`   Byte 3: 0x${byte3.toString(16)} (${byte3}) Binary: ${byte3.toString(2).padStart(8, '0')}`);
+        
+        // HDW-specific status bit analysis
+        console.log(`   HDW Status Analysis:`);
+        console.log(`   Byte 1 (0x${byte1.toString(16)}):`);
+        if (byte1 & 0x80) console.log(`     - Bit 7: Status data present ✅`);
+        if (byte1 & 0x40) console.log(`     - Bit 6: Transport active`);
+        if (byte1 & 0x20) console.log(`     - Bit 5: Possibly tape present`);
+        if (byte1 & 0x10) console.log(`     - Bit 4: Direction/ready flag`);
+        if (byte1 & 0x08) console.log(`     - Bit 3: Mode flag`);
+        if (byte1 & 0x04) console.log(`     - Bit 2: Speed flag`);
+        if (byte1 & 0x02) console.log(`     - Bit 1: Control flag`);
+        if (byte1 & 0x01) console.log(`     - Bit 0: Status flag`);
+        
+        console.log(`   Byte 2 (0x${byte2.toString(16)}):`);
+        if (byte2 & 0x80) console.log(`     - Bit 7: Additional status ✅`);
+        if (byte2 & 0x40) console.log(`     - Bit 6: Mode/transport flag`);
+        if (byte2 & 0x20) console.log(`     - Bit 5: Servo/control flag`);
+        if (byte2 & 0x10) console.log(`     - Bit 4: Direction flag`);
+        if (byte2 & 0x08) console.log(`     - Bit 3: Speed indicator`);
+        if (byte2 & 0x04) console.log(`     - Bit 2: Transport mode`);
+        if (byte2 & 0x02) console.log(`     - Bit 1: Status indicator`);
+        if (byte2 & 0x01) console.log(`     - Bit 0: Ready flag`);
+        
+        // Interpret the status based on common patterns
+        interpretHdwStatus(byte1, byte2, byte3);
+      }
+      
+    } catch (error) {
+      console.log(`❌ ${cmd.name}: ${error.message}`);
+    }
+  }
+}
+
+// Add HDW status interpreter
+function interpretHdwStatus(byte1, byte2, byte3) {
+  console.log(`   🔍 HDW Status Interpretation:`);
+  
+  // Based on your consistent CF D7 00 response
+  if (byte1 === 0xCF && byte2 === 0xD7 && byte3 === 0x00) {
+    console.log(`     📊 Standard STOP mode detected`);
+    console.log(`     💾 Tape status: Likely IN (based on response pattern)`);
+    console.log(`     🎛️  VTR ready for commands`);
+    return { mode: 'STOP', tape: true, ready: true };
+  }
+  
+  // General interpretation
+  let mode = 'UNKNOWN';
+  let tape = false;
+  let ready = false;
+  
+  // Try to determine mode from bit patterns
+  if ((byte1 & 0x40) && (byte2 & 0x40)) {
+    mode = 'ACTIVE_TRANSPORT';
+  } else if (byte1 & 0x80) {
+    mode = 'READY';
+  }
+  
+  // Try to determine tape presence
+  if (byte2 & 0x80) {
+    tape = true;
+  }
+  
+  // Try to determine ready state
+  if (byte1 & 0x80) {
+    ready = true;
+  }
+  
+  console.log(`     ⚡ Interpreted Mode: ${mode}`);
+  console.log(`     💾 Interpreted Tape: ${tape ? 'IN' : 'OUT'}`);
+  console.log(`     🎛️  Interpreted Ready: ${ready ? 'YES' : 'NO'}`);
+  
+  return { mode, tape, ready };
+}
+
 /**
  * Batch control multiple VTRs
  */
@@ -1244,5 +1343,6 @@ module.exports = {
   VTR_COMMANDS_CORRECTED,
   testCommandFormats,
   testSimpleCommands,
-  decodeVtrStatusResponse
+  decodeVtrStatusResponse,
+  debugStatusResponses
 };
