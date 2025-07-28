@@ -1,33 +1,58 @@
 const { autoScanVtrs, getVtrStatus, VTR_PORTS, humanizeStatus, sendCommand } = require('../src/commands/vtr_interface');
 
-// ✅ KEEP - Import transport functions from the new module
+// Import transport functions
 const {
-  playVtr,                    // ✅ IMPORTED - don't redefine
-  pauseVtr,                   // ✅ IMPORTED - don't redefine  
-  stopVtr,                    // ✅ IMPORTED - don't redefine
-  recordVtr,                  // ✅ IMPORTED - don't redefine
-  fastForwardVtr,             // ✅ IMPORTED - don't redefine
-  rewindVtr,                  // ✅ IMPORTED - don't redefine
-  ejectTape,                  // ✅ IMPORTED - don't redefine
-  jogForward,                 // ✅ IMPORTED - don't redefine
-  jogReverse,                 // ✅ IMPORTED - don't redefine
-  jogForwardFast,             // ✅ IMPORTED - don't redefine
-  jogReverseFast,             // ✅ IMPORTED - don't redefine
-  jogStill,                   // ✅ IMPORTED - don't redefine
-  shuttlePlus1,               // ✅ IMPORTED - don't redefine
-  shuttleMinus1,              // ✅ IMPORTED - don't redefine
-  testVtrTransportCommands,   // ✅ IMPORTED - don't redefine
-  batchControlVtrs,           // ✅ IMPORTED - don't redefine
-  sendVtrTransportCommand,    // ✅ IMPORTED - don't redefine
-  interpretVtrResponse,       // ✅ IMPORTED - don't redefine
-  getStoredTransportState,    // ✅ IMPORTED - don't redefine
-  storeTransportState,        // ✅ IMPORTED - don't redefine
-  clearTransportState,        // ✅ IMPORTED - don't redefine
-  VTR_TRANSPORT_COMMANDS,     // ✅ IMPORTED - don't redefine
-  VtrTransportError           // ✅ IMPORTED - don't redefine
+  playVtr,
+  pauseVtr,
+  stopVtr,
+  recordVtr,
+  fastForwardVtr,
+  rewindVtr,
+  ejectTape,
+  jogForward,
+  jogReverse,
+  jogForwardFast,
+  jogReverseFast,
+  jogStill,
+  shuttlePlus1,
+  shuttleMinus1,
+  testVtrTransportCommands,
+  batchControlVtrs,
+  sendVtrTransportCommand,
+  interpretVtrResponse,
+  getStoredTransportState,
+  storeTransportState,
+  clearTransportState,
+  VTR_TRANSPORT_COMMANDS,
+  VtrTransportError
 } = require('../src/commands/vtr_cmds_transport');
 
-// ✅ KEEP - Helper functions
+// Import status functions
+const {
+  getDeviceType,
+  getExtendedStatus,
+  getVtrStatusNonDestructive,
+  checkSingleVtr,
+  checkSingleVtrEnhanced,
+  debugStatusResponses,
+  testCommunication,
+  testNoTapeCommands,
+  testAlternativeCommands,
+  testExtendedStatus,
+  checkTapeStatus,
+  establishRemoteControl,
+  monitorVtr,
+  analyzeResponse,
+  decodeVtrStatusResponse,
+  interpretVtrStatusResponse,
+  getCommandBuffer,
+  VTR_STATUS_COMMANDS,
+  DEVICE_TYPES,
+  VTR_STATUS_PATTERNS,
+  VtrStatusError
+} = require('../src/commands/vtr_cmds_status');
+
+// Helper functions (keep these in test file)
 function calculateChecksum(commandBytes) {
   let checksum = 0;
   for (let i = 0; i < commandBytes.length; i++) {
@@ -36,172 +61,27 @@ function calculateChecksum(commandBytes) {
   return checksum;
 }
 
-/**
- * Create Sony 9-pin command with checksum
- */
 function createSonyCommand(cmdBytes) {
   const checksum = calculateChecksum(Buffer.from(cmdBytes));
   return Buffer.from([...cmdBytes, checksum]);
 }
 
-/**
- * Verify Sony 9-pin checksum
- */
 function verifyChecksum(command) {
   if (command.length < 2) return false;
   
-  const commandBytes = command.slice(0, -1); // All but last byte
+  const commandBytes = command.slice(0, -1);
   const providedChecksum = command[command.length - 1];
   const calculatedChecksum = calculateChecksum(commandBytes);
   
   return providedChecksum === calculatedChecksum;
 }
 
-// Update VTR_COMMANDS with working 4-byte JOG commands
-const VTR_COMMANDS = {
-  // Device Control Commands (CMD1=20) - Working ✅
-  STOP: Buffer.from([0x20, 0x00, 0x20]),           // STOP ✅
-  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // PLAY ✅
-  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // FAST FWD ✅
-  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // REWIND ✅
-  
-  // Variable speed commands (4-byte format) - WORKING! ✅
-  JOG_FORWARD_STILL: Buffer.from([0x21, 0x11, 0x00, 0x30]),     // JOG FWD STILL ✅
-  JOG_FORWARD_SLOW: Buffer.from([0x21, 0x11, 0x20, 0x10]),      // JOG FWD SLOW ✅
-  JOG_FORWARD_NORMAL: Buffer.from([0x21, 0x11, 0x40, 0x30]),    // JOG FWD NORMAL ✅
-  
-  JOG_REVERSE_SLOW: Buffer.from([0x21, 0x21, 0x20, 0x00]),      // JOG REV SLOW ✅
-  JOG_REVERSE_NORMAL: Buffer.from([0x21, 0x21, 0x40, 0x20]),    // JOG REV NORMAL ✅
-  
-  // System Commands - Working ✅
-  LOCAL_DISABLE: Buffer.from([0x00, 0x0C, 0x0C]),  // LOCAL DISABLE ✅
-  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // DEVICE TYPE ✅
-  LOCAL_ENABLE: Buffer.from([0x00, 0x1D, 0x1D]),   // LOCAL ENABLE
-  
-  // Status Commands - Working ✅
-  STATUS: Buffer.from([0x61, 0x20, 0x41]),         // STATUS ✅
-  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // TIMECODE
-  EXTENDED_STATUS: Buffer.from([0x61, 0x20, 0x41]) // STATUS ✅
-};
-
-// Also update VTR_COMMANDS_CORRECTED
-// Fix VTR_COMMANDS_CORRECTED - Remove RECORD (20-02)
-const VTR_COMMANDS_CORRECTED = {
-  // CORRECT Sony 9-pin transport commands (NO RECORD 20-02, NO PAUSE for standard HDW)
-  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // PLAY with checksum ✅
-  STOP: Buffer.from([0x20, 0x00, 0x20]),           // STOP with checksum ✅
-  // RECORD: REMOVED - 20-02 is RECORD which we're avoiding
-  // PAUSE: NOT SUPPORTED on standard HDW series (only HDW-S280)
-  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // FF with checksum ✅
-  REWIND: Buffer.from([0x20, 0x20, 0x40]),         // REW with checksum ✅
-  STANDBY_OFF: Buffer.from([0x20, 0x04, 0x24]),    // STANDBY OFF (NOT RECORD!)
-  STANDBY_ON: Buffer.from([0x20, 0x05, 0x25]),     // STANDBY ON
-  
-  // Status commands (confirmed working)
-  STATUS: Buffer.from([0x61, 0x20, 0x41]),         // Status with data request ✅
-  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // Device type request ✅
-  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // Timecode request ✅
-  TAPE_TIMER: Buffer.from([0x75, 0x20, 0x55]),     // Tape timer
-  
-  // Control commands
-  LOCAL_DISABLE: Buffer.from([0x00, 0x0C, 0x0C]),  // 00-0C Local disable ✅
-  LOCAL_ENABLE: Buffer.from([0x00, 0x1D, 0x1D])    // 00-1D Local enable
-};
-
-// Simple format commands without STX/ETX framing
-const VTR_COMMANDS_SIMPLE = {
-  // Single byte commands
-  PLAY: Buffer.from([0x20]),                     // Just PLAY command
-  STOP: Buffer.from([0x2F]),                     // Just STOP command
-  PAUSE: Buffer.from([0x25]),                    // Just PAUSE command
-  STATUS: Buffer.from([0x61]),                   // Just STATUS command
-  DEVICE_TYPE: Buffer.from([0x00]),              // Just DEVICE TYPE
-  LOCAL_DISABLE: Buffer.from([0x0C]),            // Just LOCAL DISABLE
-  
-  // Two byte commands
-  PLAY_PARAM: Buffer.from([0x20, 0x00]),         // PLAY with parameter
-  STATUS_PARAM: Buffer.from([0x61, 0x20]),       // STATUS with parameter
-  DEVICE_PARAM: Buffer.from([0x00, 0x11]),       // DEVICE with parameter
-  
-  // Three byte commands with checksum
-  PLAY_CHECKSUM: Buffer.from([0x20, 0x00, 0x20]), // PLAY with checksum
-  STATUS_CHECKSUM: Buffer.from([0x61, 0x20, 0x41]), // STATUS with checksum
-  DEVICE_CHECKSUM: Buffer.from([0x00, 0x11, 0x11])  // DEVICE with checksum
-};
-
-/**
- * Send a transport command to VTR and interpret the response
- * @param {string} path - Serial port path (e.g., '/dev/ttyRP11')
- * @param {Buffer} command - Command buffer to send
- * @param {string} commandName - Human-readable command name for logging
- * @returns {Promise<VtrCommandResult>} Result object with success status and interpreted response
- * @throws {VtrError} When path or command is invalid
- * 
- * @example
- * const result = await sendVtrCommand('/dev/ttyRP11', Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
- * if (result.success) {
- *   console.log(`VTR is now in ${result.mode} mode`);
- * }
- */
+// Update sendVtrCommand to use the transport module
 async function sendVtrCommand(path, command, commandName) {
   return await sendVtrTransportCommand(path, command, commandName);
 }
 
-/**
- * Get extended status from VTR
- * @param {string} path - VTR port path
- */
-async function getExtendedStatus(path) {
-  console.log(`📊 Getting extended status from ${path}...`);
-  
-  try {
-    const response = await sendCommand(path, VTR_COMMANDS.EXTENDED_STATUS, 3000);
-    console.log(`📥 Extended Status Response: ${response.toString('hex')}`);
-    return response;
-  } catch (error) {
-    console.log(`❌ Extended status failed: ${error.message}`);
-    return null;
-  }
-}
-
-// Fix getDeviceType function - correct response parsing
-async function getDeviceType(path) {
-  console.log(`🔍 Getting device type from ${path}...`);
-  
-  try {
-    const response = await sendCommand(path, VTR_COMMANDS.DEVICE_TYPE, 3000);
-    console.log(`📥 Device Type Response: ${response.toString('hex')}`);
-    
-    // Parse device type response - CORRECTED parsing
-    if (response.length >= 3) {
-      const deviceId = response[0];   // First byte is device ID
-      const subType = response[1];    // Second byte is sub-type
-      const version = response[2];    // Third byte is version
-      
-      console.log(`📺 Device ID: 0x${deviceId.toString(16)} (${deviceId})`);
-      console.log(`📺 Sub-type: 0x${subType.toString(16)} (${subType})`);
-      console.log(`📺 Version: 0x${version.toString(16)} (${version}`);
-      
-      const deviceTypes = {
-        0xBA: 'HDW Series VTR',     // Your VTR responds with 0xBA
-        0x10: 'BVW series',
-        0x20: 'DVW series', 
-        0x30: 'HDW series',
-        0x40: 'J series',
-        0x50: 'MSW series'
-      };
-      
-      const deviceName = deviceTypes[deviceId] || `Unknown (0x${deviceId.toString(16)})`;
-      console.log(`📺 Device Type: ${deviceName}`);
-      return deviceName;
-    }
-    
-    return 'Unknown';
-  } catch (error) {
-    console.log(`❌ Device type check failed: ${error.message}`);
-    return null;
-  }
-}
+// Remove all the status function definitions that are now imported
 
 /**
  * Get actual timecode from VTR using LTC (working method)
@@ -1291,36 +1171,24 @@ async function getVtrStatusNonDestructive(path) {
 
 // Export functions for use by other modules
 module.exports = {
-  checkSingleVtr,
-  checkSingleVtrEnhanced,
+  // Test-specific functions (keep these)
   scanAllVtrs,
-  monitorVtr,
-  testCommunication,
-  testNoTapeCommands,
-  testAlternativeCommands,
+  testVtrCommands,
   testChecksumCommands,
-  testExtendedStatus,
-  checkTapeStatus,
   diagnosticCheck,
-  establishRemoteControl,
   showTroubleshootingGuide,
   showVtrMenuGuide,
   sendRawCommand,
   calculateChecksum,
   createSonyCommand,
   verifyChecksum,
-  getExtendedStatus,
-  getDeviceType,
   controlVtr,
-  analyzeResponse,
   diagnoseMenuIssue,
   testModelVariants,
   testCommandFormats,
   testSimpleCommands,
-  decodeVtrStatusResponse,
-  debugStatusResponses,
-  getCommandBuffer,
-  // Timecode functions
+  
+  // Timecode functions (keep these)
   testAllTimecodeCommands,
   testTimecodeMovement,
   getDetailedTimecode,
@@ -1331,6 +1199,10 @@ module.exports = {
   decodeTapeTimecode,
   testRealTapeTimecode,
   bcdToBin,
-  // ✅ Re-export transport functions from transport module
-  ...require('../src/commands/vtr_cmds_transport')
+  
+  // Re-export transport functions
+  ...require('../src/commands/vtr_cmds_transport'),
+  
+  // Re-export status functions
+  ...require('../src/commands/vtr_cmds_status')
 };
