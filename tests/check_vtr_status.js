@@ -1564,35 +1564,29 @@ async function testSimpleCommands(path) {
   return workingCommands > 0;
 }
 
-// Add this to your script - PARITY ERROR FIX
-async function testSerialConfiguration(path) {
-  console.log(`🔧 Testing serial port configurations to fix parity error...`);
+// Add this to your script - CONFIRMED WORKING COMMANDS!
+const VTR_COMMANDS_WORKING_FINAL = {
+  // Working 3-byte format (CONFIRMED!)
+  EXTENDED_STATUS: Buffer.from([0x61, 0x20, 0x41]),    // Working: CF D7 00
+  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),        // Working: BA BA F8
+  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),           // Working: 91 77 00
+  TAPE_TIMER: Buffer.from([0x75, 0x20, 0x55]),         // Working: C5 57 00
   
-  const configurations = [
-    { name: 'Standard', baud: 38400, parity: 'none', stopBits: 1, dataBits: 8 },
-    { name: 'Even Parity', baud: 38400, parity: 'even', stopBits: 1, dataBits: 8 },
-    { name: 'Odd Parity', baud: 38400, parity: 'odd', stopBits: 1, dataBits: 8 },
-    { name: '2 Stop Bits', baud: 38400, parity: 'none', stopBits: 2, dataBits: 8 },
-    { name: '7 Data Bits', baud: 38400, parity: 'even', stopBits: 1, dataBits: 7 },
-    { name: '9600 Baud', baud: 9600, parity: 'none', stopBits: 1, dataBits: 8 },
-    { name: '19200 Baud', baud: 19200, parity: 'none', stopBits: 1, dataBits: 8 }
-  ];
+  // Transport commands (same format)
+  PLAY: Buffer.from([0x20, 0x00, 0x20]),               // Should work now
+  STOP: Buffer.from([0x2F, 0x00, 0x2F]),               // Should work now
+  PAUSE: Buffer.from([0x25, 0x00, 0x25]),              // Should work now
+  FAST_FORWARD: Buffer.from([0x21, 0x00, 0x21]),       // Should work now
+  REWIND: Buffer.from([0x22, 0x00, 0x22]),             // Should work now
   
-  console.log('\n🔍 Current error: Parity Error (0x10) - Testing different configurations...\n');
-  
-  for (const config of configurations) {
-    console.log(`📡 Testing ${config.name}:`);
-    console.log(`   Baud: ${config.baud}, Parity: ${config.parity}, Stop: ${config.stopBits}, Data: ${config.dataBits}`);
-    
-    // This would require modifying the sendCommand function to accept serial config
-    // For now, provide the configuration instructions
-    console.log(`   💡 To test: Modify VTR interface to use these settings`);
-  }
-  
-  return configurations;
-}
+  // Control commands
+  LOCAL_DISABLE: Buffer.from([0x0C, 0x00, 0x0C]),      // Should work now
+  LOCAL_ENABLE: Buffer.from([0x0D, 0x00, 0x0D])        // Should work now
+};
 
-// Call the main function if this file is run directly
+/**
+ * Call the main function if this file is run directly
+ */
 if (require.main === module) {
   interactiveCheck().catch(error => {
     console.error('❌ Error:', error.message);
