@@ -877,6 +877,9 @@ async function interactiveCheck() {
     console.log('  node check_vtr_status.js --play <port>             # Send PLAY command');
     console.log('  node check_vtr_status.js --stop <port>             # Send STOP command');
     console.log('  node check_vtr_status.js --pause <port>            # Send PAUSE command');
+    console.log('  node check_vtr_status.js --jog-forward <port>      # Send JOG FORWARD command');
+    console.log('  node check_vtr_status.js --jog-reverse <port>      # Send JOG REVERSE command');
+    console.log('  node check_vtr_status.js --jog-still <port>        # Send JOG STILL command');
     console.log('  node check_vtr_status.js --control <port>          # Interactive control');
     console.log('  node check_vtr_status.js --raw <port> "20 01 21"   # Send raw command');
     return;
@@ -915,6 +918,43 @@ async function interactiveCheck() {
         }
         await pauseVtr(port);
         break;
+      case '--jog-forward':
+      case '--jog-fwd':
+        if (!port) {
+          console.log('❌ Port required for --jog-forward');
+          return;
+        }
+        await jogForward(port);
+        break;
+      case '--jog-reverse':
+      case '--jog-rev':
+        if (!port) {
+          console.log('❌ Port required for --jog-reverse');
+          return;
+        }
+        await jogReverse(port);
+        break;
+      case '--jog-still':
+        if (!port) {
+          console.log('❌ Port required for --jog-still');
+          return;
+        }
+        await jogStill(port);
+        break;
+      case '--jog-fast-forward':
+        if (!port) {
+          console.log('❌ Port required for --jog-fast-forward');
+          return;
+        }
+        await jogForwardFast(port);
+        break;
+      case '--jog-fast-reverse':
+        if (!port) {
+          console.log('❌ Port required for --jog-fast-reverse');
+          return;
+        }
+        await jogReverseFast(port);
+        break;
       case '--control':
         if (!port) {
           console.log('❌ Port required for --control');
@@ -930,7 +970,13 @@ async function interactiveCheck() {
         await sendRawCommand(port, rawCommand);
         break;
       default:
-        await checkSingleVtr(command);
+        // Check if it's a port path (not starting with --)
+        if (!command.startsWith('--')) {
+          await checkSingleVtr(command);
+        } else {
+          console.log(`❌ Unknown command: ${command}`);
+          console.log('Use "node check_vtr_status.js" to see available commands');
+        }
         break;
     }
   } catch (error) {
