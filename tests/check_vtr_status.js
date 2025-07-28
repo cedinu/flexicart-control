@@ -32,58 +32,48 @@ function verifyChecksum(command) {
   return providedChecksum === calculatedChecksum;
 }
 
-// Original VTR Commands (without proper checksums - for reference)
+// Replace the VTR_COMMANDS with the correct Sony 9-pin format
 const VTR_COMMANDS = {
-  // Transport Control Commands
-  PLAY: Buffer.from([0x88, 0x01, 0x2C, 0x01, 0xFF]),
-  STOP: Buffer.from([0x88, 0x01, 0x20, 0x0F, 0xFF]),
-  PAUSE: Buffer.from([0x88, 0x01, 0x25, 0x11, 0xFF]),
-  RECORD: Buffer.from([0x88, 0x01, 0x2F, 0x01, 0xFF]),
-  FAST_FORWARD: Buffer.from([0x88, 0x01, 0x21, 0x0F, 0xFF]),
-  REWIND: Buffer.from([0x88, 0x01, 0x22, 0x0F, 0xFF]),
+  // CORRECT Transport Control Commands (Sony 9-pin standard)
+  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // PLAY = 20 01 (+ checksum)
+  STOP: Buffer.from([0x20, 0x00, 0x20]),           // STOP = 20 00 (+ checksum)
+  PAUSE: Buffer.from([0x20, 0x02, 0x22]),          // PAUSE = 20 02 (+ checksum)
+  FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // FF = 20 10 (+ checksum)
+  REWIND: Buffer.from([0x20, 0x20, 0x00]),         // REW = 20 20 (+ checksum)
+  RECORD: Buffer.from([0x20, 0x04, 0x24]),         // RECORD = 20 04 (+ checksum)
   
-  // Status and Information Commands
-  STATUS: Buffer.from([0x88, 0x01, 0x61, 0x20, 0xFF]),
-  TIMECODE: Buffer.from([0x88, 0x01, 0x74, 0x20, 0xFF]),
+  // Status commands (confirmed working)
+  STATUS: Buffer.from([0x61, 0x20, 0x41]),         // Working: CF D7 00
+  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // Working: BA BA F8
+  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // Working: 91 77 00
   
-  // Control Commands
-  LOCAL_DISABLE: Buffer.from([0x88, 0x01, 0x0C, 0x00, 0xFF]),
-  LOCAL_ENABLE: Buffer.from([0x88, 0x01, 0x0C, 0x01, 0xFF]),
-  DEVICE_TYPE: Buffer.from([0x88, 0x01, 0x00, 0x11, 0xFF]),
+  // Control commands
+  LOCAL_DISABLE: Buffer.from([0x0C, 0x00, 0x0C]),  // Working format
+  LOCAL_ENABLE: Buffer.from([0x0C, 0x01, 0x0D]),   // Working format
   
-  // HDW-specific commands
-  EJECT: Buffer.from([0x88, 0x01, 0x2A, 0x05, 0xFF]),
-  EXTENDED_STATUS: Buffer.from([0x88, 0x01, 0x65, 0x20, 0xFF]),
-  
-  // Jog/Shuttle commands
-  JOG_FORWARD: Buffer.from([0x88, 0x01, 0x31, 0x01, 0xFF]),
-  JOG_REVERSE: Buffer.from([0x88, 0x01, 0x32, 0x01, 0xFF]),
-  SHUTTLE_PLUS_1: Buffer.from([0x88, 0x01, 0x33, 0x01, 0xFF]),
-  SHUTTLE_MINUS_1: Buffer.from([0x88, 0x01, 0x34, 0x01, 0xFF])
+  // Extended commands
+  EXTENDED_STATUS: Buffer.from([0x61, 0x20, 0x41]) // Working format
 };
 
-// Corrected VTR Commands - Sony 9-pin protocol (simple format, no STX/ETX)
+// Also update VTR_COMMANDS_CORRECTED to match
 const VTR_COMMANDS_CORRECTED = {
-  // Transport commands (correct Sony 9-pin format)
-  PLAY: Buffer.from([0x20, 0x00, 0x20]),           // PLAY with checksum
-  STOP: Buffer.from([0x20, 0x0F, 0x2F]),           // STOP with checksum  
-  PAUSE: Buffer.from([0x20, 0x01, 0x21]),          // PAUSE with checksum
+  // CORRECT Sony 9-pin transport commands
+  PLAY: Buffer.from([0x20, 0x01, 0x21]),           // PLAY with checksum
+  STOP: Buffer.from([0x20, 0x00, 0x20]),           // STOP with checksum  
+  PAUSE: Buffer.from([0x20, 0x02, 0x22]),          // PAUSE with checksum
   FAST_FORWARD: Buffer.from([0x20, 0x10, 0x30]),   // FF with checksum
   REWIND: Buffer.from([0x20, 0x20, 0x00]),         // REW with checksum
-  RECORD: Buffer.from([0x20, 0x02, 0x22]),         // RECORD with checksum
+  RECORD: Buffer.from([0x20, 0x04, 0x24]),         // RECORD with checksum
   
-  // Status commands  
+  // Status commands (confirmed working)
   STATUS: Buffer.from([0x61, 0x20, 0x41]),         // Status with data request
-  STATUS_SIMPLE: Buffer.from([0x61, 0x61]),        // Simple status
   DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // Device type request
+  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // Timecode request
+  TAPE_TIMER: Buffer.from([0x75, 0x20, 0x55]),     // Tape timer
   
   // Control commands
   LOCAL_DISABLE: Buffer.from([0x0C, 0x00, 0x0C]),  // Local disable
-  LOCAL_ENABLE: Buffer.from([0x0C, 0x01, 0x0D]),   // Local enable
-  
-  // Timer commands
-  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // Timecode request
-  TAPE_TIMER: Buffer.from([0x75, 0x20, 0x55])      // Tape timer
+  LOCAL_ENABLE: Buffer.from([0x0C, 0x01, 0x0D])    // Local enable
 };
 
 // Simple format commands without STX/ETX framing
@@ -144,7 +134,7 @@ async function sendVtrCommand(path, command, commandName) {
  * @param {string} path - VTR port path
  */
 async function playVtr(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.PLAY, 'PLAY');
+  return await sendVtrCommand(path, Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
 }
 
 /**
@@ -152,7 +142,7 @@ async function playVtr(path) {
  * @param {string} path - VTR port path
  */
 async function pauseVtr(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.PAUSE, 'PAUSE');
+  return await sendVtrCommand(path, Buffer.from([0x20, 0x02, 0x22]), 'PAUSE');
 }
 
 /**
@@ -160,7 +150,7 @@ async function pauseVtr(path) {
  * @param {string} path - VTR port path
  */
 async function stopVtr(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.STOP, 'STOP');
+  return await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
 }
 
 /**
@@ -177,7 +167,7 @@ async function recordVtr(path) {
  * @param {string} path - VTR port path
  */
 async function fastForwardVtr(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.FAST_FORWARD, 'FAST FORWARD');
+  return await sendVtrCommand(path, Buffer.from([0x20, 0x10, 0x30]), 'FAST FORWARD');
 }
 
 /**
@@ -185,7 +175,7 @@ async function fastForwardVtr(path) {
  * @param {string} path - VTR port path
  */
 async function rewindVtr(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.REWIND, 'REWIND');
+  return await sendVtrCommand(path, Buffer.from([0x20, 0x20, 0x00]), 'REWIND');
 }
 
 /**
