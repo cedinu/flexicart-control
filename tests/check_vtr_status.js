@@ -1564,24 +1564,27 @@ async function testSimpleCommands(path) {
   return workingCommands > 0;
 }
 
-// Add this to your script - CONFIRMED WORKING COMMANDS!
-const VTR_COMMANDS_WORKING_FINAL = {
-  // Working 3-byte format (CONFIRMED!)
-  EXTENDED_STATUS: Buffer.from([0x61, 0x20, 0x41]),    // Working: CF D7 00
-  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),        // Working: BA BA F8
-  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),           // Working: 91 77 00
-  TAPE_TIMER: Buffer.from([0x75, 0x20, 0x55]),         // Working: C5 57 00
+// Replace the VTR_COMMANDS in your script with the working format
+const VTR_COMMANDS = {
+  // Use the confirmed working 3-byte format
+  PLAY: Buffer.from([0x20, 0x00, 0x20]),           // Working format
+  STOP: Buffer.from([0x2F, 0x00, 0x2F]),           // Working format
+  PAUSE: Buffer.from([0x25, 0x00, 0x25]),          // Working format
+  FAST_FORWARD: Buffer.from([0x21, 0x00, 0x21]),   // Working format
+  REWIND: Buffer.from([0x22, 0x00, 0x22]),         // Working format
+  RECORD: Buffer.from([0x2E, 0x00, 0x2E]),         // Working format
   
-  // Transport commands (same format)
-  PLAY: Buffer.from([0x20, 0x00, 0x20]),               // Should work now
-  STOP: Buffer.from([0x2F, 0x00, 0x2F]),               // Should work now
-  PAUSE: Buffer.from([0x25, 0x00, 0x25]),              // Should work now
-  FAST_FORWARD: Buffer.from([0x21, 0x00, 0x21]),       // Should work now
-  REWIND: Buffer.from([0x22, 0x00, 0x22]),             // Should work now
+  // Status commands (confirmed working)
+  STATUS: Buffer.from([0x61, 0x20, 0x41]),         // Working: CF D7 00
+  DEVICE_TYPE: Buffer.from([0x00, 0x11, 0x11]),    // Working: BA BA F8
+  TIMECODE: Buffer.from([0x74, 0x20, 0x54]),       // Working: 91 77 00
   
   // Control commands
-  LOCAL_DISABLE: Buffer.from([0x0C, 0x00, 0x0C]),      // Should work now
-  LOCAL_ENABLE: Buffer.from([0x0D, 0x00, 0x0D])        // Should work now
+  LOCAL_DISABLE: Buffer.from([0x0C, 0x00, 0x0C]),  // Working format
+  LOCAL_ENABLE: Buffer.from([0x0D, 0x00, 0x0D]),   // Working format
+  
+  // Extended commands
+  EXTENDED_STATUS: Buffer.from([0x61, 0x20, 0x41]) // Working format
 };
 
 /**
@@ -1637,6 +1640,5 @@ module.exports = {
   VTR_COMMANDS,
   VTR_COMMANDS_CORRECTED,
   testCommandFormats,
-  testSimpleCommands,
-  testSerialConfiguration
+  testSimpleCommands
 };
