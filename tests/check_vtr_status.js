@@ -302,38 +302,33 @@ async function getDeviceType(path) {
 }
 
 /**
- * Get actual timecode from VTR with HDW-specific parsing
+ * Get actual timecode from VTR using LTC (working method)
  * @param {string} path - VTR port path
  * @returns {Promise<string>} Timecode string
  */
 async function getVtrTimecode(path) {
   try {
-    const response = await sendCommand(path, Buffer.from([0x74, 0x20, 0x54]), 3000);
+    // Use LTC Time Data command (78 20 58) - this works!
+    const response = await sendCommand(path, Buffer.from([0x78, 0x20, 0x58]), 3000);
     
     if (response && response.length >= 3) {
-      const byte1 = response[0];
-      const byte2 = response[1]; 
-      const byte3 = response[2];
+      // Decode using the working packed format
+      const decoded = decodeTimecodeResponse(response, 'LTC');
       
-      // Your VTR returns 91 77 00 which indicates no valid timecode source
-      if (byte1 === 0x91 && byte2 === 0x77 && byte3 === 0x00) {
-        // Check if there's a longer response with actual timecode data
-        if (response.length >= 8) {
-          // Try to parse extended timecode format
-          const hours = response[3];
-          const minutes = response[4];
-          const seconds = response[5];
-          const frames = response[6];
-          
-          return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-        }
-        
-        return 'TC:UNAVAILABLE'; // Indicate no timecode source
+      if (decoded && decoded !== 'N/A') {
+        return decoded;
       }
       
-      // For other responses, try to decode
-      // HDW timecode format may be different - need more investigation
-      return 'TC:UNKNOWN_FORMAT';
+      // Fallback: try Timer1 command
+      const timer1Response = await sendCommand(path, Buffer.from([0x75, 0x20, 0x55]), 3000);
+      if (timer1Response && timer1Response.length >= 3) {
+        const timer1Decoded = decodeTimecodeResponse(timer1Response, 'Timer1');
+        if (timer1Decoded && timer1Decoded !== 'N/A') {
+          return `T1:${timer1Decoded}`;
+        }
+      }
+      
+      return 'TC:STATIC'; // Timecode present but not advancing
     }
     
     return 'TC:NO_RESPONSE';
@@ -344,7 +339,7 @@ async function getVtrTimecode(path) {
 }
 
 /**
- * Check single VTR status without disrupting transport
+ * Check single VTR status with working timecode
  */
 async function checkSingleVtr(path) {
   console.log(`\n🔍 Checking VTR at ${path}...`);
@@ -358,7 +353,7 @@ async function checkSingleVtr(path) {
       return null;
     }
     
-    // Get actual timecode separately (this also doesn't affect transport)
+    // Get actual timecode using working LTC command
     const timecode = await getVtrTimecode(path);
     
     console.log(`✅ VTR Found!`);
@@ -1619,215 +1614,110 @@ async function getVtrStatusNonDestructive(path) {
 }
 
 /**
- * Test comprehensive timecode retrieval methods for HDW VTR
+ * Get comprehensive timecode information from all working sources
  * @param {string} path - VTR port path
+ * @returns {Promise<Object>} Timecode object with multiple sources
  */
-async function testAllTimecodeCommands(path) {
-  console.log('🕐 Testing all Sony 9-pin timecode commands...\n');
-  
-  const timecodeCommands = [
-    // Standard Sony 9-pin timecode commands
-    { name: 'Current Time Data', cmd: Buffer.from([0x74, 0x20, 0x54]), format: 'Standard TC request' },
-    { name: 'LTC Time Data', cmd: Buffer.from([0x78, 0x20, 0x58]), format: 'LTC timecode' },
-    { name: 'VITC Time Data', cmd: Buffer.from([0x79, 0x20, 0x59]), format: 'VITC timecode' },
-    { name: 'Timer 1', cmd: Buffer.from([0x75, 0x20, 0x55]), format: 'Timer 1 data' },
-    { name: 'Timer 2', cmd: Buffer.from([0x76, 0x20, 0x56]), format: 'Timer 2 data' },
-    { name: 'User Bits', cmd: Buffer.from([0x77, 0x20, 0x57]), format: 'User bits data' },
-    
-    // Extended timecode commands
-    { name: 'TC Generator', cmd: Buffer.from([0x7A, 0x20, 0x5A]), format: 'TC generator data' },
-    { name: 'UB Generator', cmd: Buffer.from([0x7B, 0x20, 0x5B]), format: 'UB generator data' },
-    
-    // Alternative status with timecode
-    { name: 'Extended Status', cmd: Buffer.from([0x60, 0x20, 0x40]), format: 'Extended status' },
-    { name: 'Full Status', cmd: Buffer.from([0x63, 0x20, 0x43]), format: 'Full status block' },
-    
-    // HDW-specific commands (if any)
-    { name: 'HDW Position', cmd: Buffer.from([0x71, 0x20, 0x51]), format: 'Position data' },
-    { name: 'Search Data', cmd: Buffer.from([0x72, 0x20, 0x52]), format: 'Search position' }
-  ];
-  
-  for (const tcCmd of timecodeCommands) {
-    try {
-      console.log(`📤 Testing ${tcCmd.name} (${tcCmd.format})...`);
-      console.log(`   Command: ${tcCmd.cmd.toString('hex')}`);
-      
-      const response = await sendCommand(path, tcCmd.cmd, 3000);
-      
-      if (response && response.length > 0) {
-        console.log(`✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
-        console.log(`   Bytes: [${Array.from(response).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ')}]`);
-        console.log(`   ASCII: "${response.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}" `);
-        
-        // Try to decode if it looks like timecode
-        if (response.length >= 4) {
-          const decoded = decodeTimecodeResponse(response, tcCmd.name);
-          if (decoded) {
-            console.log(`🕐 Decoded timecode: ${decoded}`);
-          }
-        }
-      } else {
-        console.log(`❌ No response`);
-      }
-      
-      console.log(''); // Empty line for readability
-      
-    } catch (error) {
-      console.log(`❌ Error: ${error.message}\n`);
-    }
-  }
-}
-
-/**
- * Decode timecode response based on Sony 9-pin protocol variations
- * @param {Buffer} response - Raw response buffer
- * @param {string} commandName - Name of command that generated response
- * @returns {string|null} Decoded timecode or null if not valid
- */
-function decodeTimecodeResponse(response, commandName) {
-  if (!response || response.length < 3) return null;
-  
-  const bytes = Array.from(response);
-  const hex = response.toString('hex');
-  
-  console.log(`🔍 Analyzing ${commandName} response pattern:`);
-  
-  // Check for "no timecode" patterns
-  if (hex === '917700' || hex === '919100' || hex === '000000') {
-    console.log(`   ⚠️  Pattern indicates no timecode available`);
-    return null;
-  }
-  
-  // Try different Sony 9-pin timecode formats
-  
-  // Format 1: Standard BCD timecode (4+ bytes)
-  if (response.length >= 4) {
-    try {
-      const hours = bcdToBin(bytes[0]);
-      const minutes = bcdToBin(bytes[1]);
-      const seconds = bcdToBin(bytes[2]);
-      const frames = bcdToBin(bytes[3]);
-      
-      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
-        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-        console.log(`   ✅ BCD format: ${timecode}`);
-        return timecode;
-      }
-    } catch (e) {
-      // BCD decode failed, try other formats
-    }
-  }
-  
-  // Format 2: Binary timecode
-  if (response.length >= 4) {
-    const hours = bytes[0];
-    const minutes = bytes[1];
-    const seconds = bytes[2];
-    const frames = bytes[3];
-    
-    if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
-      const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-      console.log(`   ✅ Binary format: ${timecode}`);
-      return timecode;
-    }
-  }
-  
-  // Format 3: Packed timecode (Sony specific)
-  if (response.length >= 3) {
-    try {
-      const packed = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
-      const frames = packed & 0x3F;
-      const seconds = (packed >> 6) & 0x3F;
-      const minutes = (packed >> 12) & 0x3F;
-      const hours = (packed >> 18) & 0x1F;
-      
-      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
-        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-        console.log(`   ✅ Packed format: ${timecode}`);
-        return timecode;
-      }
-    } catch (e) {
-      // Packed decode failed
-    }
-  }
-  
-  console.log(`   ❓ Unknown format - Raw: ${hex}`);
-  return null;
-}
-
-/**
- * Convert BCD (Binary Coded Decimal) to binary
- * @param {number} bcd - BCD byte
- * @returns {number} Binary value
- */
-function bcdToBin(bcd) {
-  return ((bcd >> 4) * 10) + (bcd & 0x0F);
-}
-
-/**
- * Test timecode during transport to see if it updates
- * @param {string} path - VTR port path
- */
-async function testTimecodeMovement(path) {
-  console.log('🎬 Testing timecode during transport...\n');
+async function getComprehensiveTimecode(path) {
+  const timecodeData = {
+    ltc: null,
+    timer1: null,
+    primary: null,
+    isAdvancing: false,
+    raw: {}
+  };
   
   try {
-    // Step 1: Stop and get baseline
-    console.log('📤 Sending STOP...');
-    await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    console.log('📤 Getting baseline timecode...');
-    const baselineTC = await getDetailedTimecode(path);
-    console.log(`📊 Baseline: ${baselineTC}\n`);
-    
-    // Step 2: Start PLAY and monitor timecode
-    console.log('📤 Starting PLAY...');
-    await sendVtrCommand(path, Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
-    
-    // Sample timecode multiple times during play
-    for (let i = 0; i < 5; i++) {
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
-      const currentTC = await getDetailedTimecode(path);
-      console.log(`📊 Play sample ${i + 1}: ${currentTC}`);
+    // Get LTC timecode (working)
+    const ltcResponse = await sendCommand(path, Buffer.from([0x78, 0x20, 0x58]), 1000);
+    if (ltcResponse && ltcResponse.length >= 3) {
+      timecodeData.ltc = decodeTimecodeResponse(ltcResponse, 'LTC');
+      timecodeData.raw.ltc = ltcResponse.toString('hex');
     }
     
-    // Step 3: Stop and get final timecode
-    console.log('\n📤 Stopping...');
-    await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Get Timer1 timecode (working)
+    const timer1Response = await sendCommand(path, Buffer.from([0x75, 0x20, 0x55]), 1000);
+    if (timer1Response && timer1Response.length >= 3) {
+      timecodeData.timer1 = decodeTimecodeResponse(timer1Response, 'Timer1');
+      timecodeData.raw.timer1 = timer1Response.toString('hex');
+    }
     
-    const finalTC = await getDetailedTimecode(path);
-    console.log(`📊 Final: ${finalTC}`);
+    // Determine primary timecode source
+    if (timecodeData.ltc && timecodeData.ltc !== 'N/A') {
+      timecodeData.primary = timecodeData.ltc;
+    } else if (timecodeData.timer1 && timecodeData.timer1 !== 'N/A') {
+      timecodeData.primary = timecodeData.timer1;
+    } else {
+      timecodeData.primary = 'TC:UNAVAILABLE';
+    }
+    
+    return timecodeData;
     
   } catch (error) {
-    console.log(`❌ Test failed: ${error.message}`);
+    timecodeData.primary = 'TC:ERROR';
+    return timecodeData;
   }
 }
 
 /**
- * Get detailed timecode from multiple sources
- * @param {string} path - VTR port path  
- * @returns {string} Detailed timecode info
+ * Test if timecode advances during different transport modes
+ * @param {string} path - VTR port path
  */
-async function getDetailedTimecode(path) {
-  const commands = [
-    { name: 'Standard', cmd: Buffer.from([0x74, 0x20, 0x54]) },
-    { name: 'LTC', cmd: Buffer.from([0x78, 0x20, 0x58]) },
-    { name: 'Timer1', cmd: Buffer.from([0x75, 0x20, 0x55]) }
-  ];
+async function testTimecodeAdvancement(path) {
+  console.log('🎬 Testing timecode advancement during transport...\n');
   
-  const results = [];
-  
-  for (const cmd of commands) {
-    try {
-      const response = await sendCommand(path, cmd.cmd, 1000);
-      const decoded = decodeTimecodeResponse(response, cmd.name);
-      results.push(`${cmd.name}:${decoded || 'N/A'}`);
-    } catch (e) {
-      results.push(`${cmd.name}:ERROR`);
+  try {
+    // Establish baseline
+    console.log('📤 Getting baseline timecode...');
+    const baseline = await getComprehensiveTimecode(path);
+    console.log(`📊 Baseline LTC: ${baseline.ltc}`);
+    console.log(`📊 Baseline Timer1: ${baseline.timer1}\n`);
+    
+    // Test PLAY mode
+    console.log('📤 Testing PLAY advancement...');
+    await sendVtrCommand(path, Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
+    
+    // Sample multiple times to detect movement
+    const samples = [];
+    for (let i = 0; i < 3; i++) {
+      await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
+      const sample = await getComprehensiveTimecode(path);
+      samples.push(sample);
+      console.log(`📊 PLAY Sample ${i + 1}: LTC:${sample.ltc} | T1:${sample.timer1}`);
     }
+    
+    // Check if any samples show advancement
+    const ltcValues = samples.map(s => s.ltc).filter(tc => tc && tc !== 'N/A');
+    const timer1Values = samples.map(s => s.timer1).filter(tc => tc && tc !== 'N/A');
+    
+    const ltcAdvanced = new Set(ltcValues).size > 1;
+    const timer1Advanced = new Set(timer1Values).size > 1;
+    
+    console.log(`\n📊 Analysis:`);
+    console.log(`   LTC Advanced: ${ltcAdvanced ? '✅ YES' : '❌ NO'}`);
+    console.log(`   Timer1 Advanced: ${timer1Advanced ? '✅ YES' : '❌ NO'}`);
+    
+    if (!ltcAdvanced && !timer1Advanced) {
+      console.log(`\n⚠️  Timecode is not advancing during PLAY. Possible causes:`);
+      console.log(`   1. Tape is not actually moving (mechanical issue)`);
+      console.log(`   2. No timecode recorded on tape`);
+      console.log(`   3. Timecode reader needs adjustment`);
+      console.log(`   4. VTR servo/transport system issue`);
+      
+      // Test fast forward to see if that moves timecode
+      console.log(`\n📤 Testing FAST FORWARD...`);
+      await sendVtrCommand(path, Buffer.from([0x20, 0x10, 0x30]), 'FAST FORWARD');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const ffSample = await getComprehensiveTimecode(path);
+      console.log(`📊 FF Sample: LTC:${ffSample.ltc} | T1:${ffSample.timer1}`);
+    }
+    
+    // Stop transport
+    console.log(`\n📤 Stopping...`);
+    await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
+    
+  } catch (error) {
+    console.log(`❌ Timecode advancement test failed: ${error.message}`);
   }
-  
-  return results.join(' | ');
 }
