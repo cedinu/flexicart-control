@@ -801,8 +801,7 @@ async function testVtrCommands(path) {
 async function controlVtr(path) {
   console.log(`🎛️ Interactive VTR Control for ${path}`);
   console.log('=====================================');
-  console.log('Commands: play, stop, ff, rew, eject, status, quit');
-  console.log('⚠️  Note: PAUSE not available on standard HDW series');
+  console.log('Commands: play, stop, ff, rew, jog-fwd, jog-rev, jog-still, eject, status, quit');
   
   const readline = require('readline');
   const rl = readline.createInterface({
@@ -822,15 +821,22 @@ async function controlVtr(path) {
           case 'stop':
             await stopVtr(path);
             break;
-          case 'pause':
-            console.log('⚠️  PAUSE not supported on standard HDW. Use STOP instead.');
-            await stopVtr(path);
-            break;
           case 'ff':
             await fastForwardVtr(path);
             break;
           case 'rew':
             await rewindVtr(path);
+            break;
+          case 'jog-fwd':
+          case 'jog-forward':
+            await jogForward(path);
+            break;
+          case 'jog-rev':
+          case 'jog-reverse':
+            await jogReverse(path);
+            break;
+          case 'jog-still':
+            await jogStill(path);
             break;
           case 'eject':
             await ejectTape(path);
@@ -843,7 +849,7 @@ async function controlVtr(path) {
             rl.close();
             return;
           default:
-            console.log('Unknown command. Available: play, stop, ff, rew, eject, status, quit');
+            console.log('Unknown command. Available: play, stop, ff, rew, jog-fwd, jog-rev, jog-still, eject, status, quit');
         }
       } catch (error) {
         console.log(`❌ Command failed: ${error.message}`);
