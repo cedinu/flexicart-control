@@ -1,35 +1,33 @@
 const { autoScanVtrs, getVtrStatus, VTR_PORTS, humanizeStatus, sendCommand } = require('../src/commands/vtr_interface');
 
-// Import transport functions from the new module
+// ✅ KEEP - Import transport functions from the new module
 const {
-  playVtr,
-  pauseVtr,
-  stopVtr,
-  recordVtr,
-  fastForwardVtr,
-  rewindVtr,
-  ejectTape,
-  jogForward,
-  jogReverse,
-  jogForwardFast,
-  jogReverseFast,
-  jogStill,
-  shuttlePlus1,
-  shuttleMinus1,
-  testVtrTransportCommands,
-  batchControlVtrs,
-  sendVtrTransportCommand,
-  interpretVtrResponse,
-  getStoredTransportState,
-  storeTransportState,
-  clearTransportState,
-  VTR_TRANSPORT_COMMANDS,
-  VtrTransportError
+  playVtr,                    // ✅ IMPORTED - don't redefine
+  pauseVtr,                   // ✅ IMPORTED - don't redefine  
+  stopVtr,                    // ✅ IMPORTED - don't redefine
+  recordVtr,                  // ✅ IMPORTED - don't redefine
+  fastForwardVtr,             // ✅ IMPORTED - don't redefine
+  rewindVtr,                  // ✅ IMPORTED - don't redefine
+  ejectTape,                  // ✅ IMPORTED - don't redefine
+  jogForward,                 // ✅ IMPORTED - don't redefine
+  jogReverse,                 // ✅ IMPORTED - don't redefine
+  jogForwardFast,             // ✅ IMPORTED - don't redefine
+  jogReverseFast,             // ✅ IMPORTED - don't redefine
+  jogStill,                   // ✅ IMPORTED - don't redefine
+  shuttlePlus1,               // ✅ IMPORTED - don't redefine
+  shuttleMinus1,              // ✅ IMPORTED - don't redefine
+  testVtrTransportCommands,   // ✅ IMPORTED - don't redefine
+  batchControlVtrs,           // ✅ IMPORTED - don't redefine
+  sendVtrTransportCommand,    // ✅ IMPORTED - don't redefine
+  interpretVtrResponse,       // ✅ IMPORTED - don't redefine
+  getStoredTransportState,    // ✅ IMPORTED - don't redefine
+  storeTransportState,        // ✅ IMPORTED - don't redefine
+  clearTransportState,        // ✅ IMPORTED - don't redefine
+  VTR_TRANSPORT_COMMANDS,     // ✅ IMPORTED - don't redefine
+  VtrTransportError           // ✅ IMPORTED - don't redefine
 } = require('../src/commands/vtr_cmds_transport');
 
-/**
- * Calculate simple Sony 9-pin checksum (XOR of all bytes)
- */
+// ✅ KEEP - Helper functions
 function calculateChecksum(commandBytes) {
   let checksum = 0;
   for (let i = 0; i < commandBytes.length; i++) {
@@ -150,99 +148,9 @@ async function sendVtrCommand(path, command, commandName) {
 }
 
 /**
- * Play command
+ * Get extended status from VTR
  * @param {string} path - VTR port path
  */
-async function playVtr(path) {
-  return await sendVtrCommand(path, Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
-}
-
-/**
- * Pause command - NOT AVAILABLE on standard HDW series
- * @param {string} path - VTR port path
- */
-async function pauseVtr(path) {
-  console.log('⚠️  PAUSE command is NOT supported on standard HDW series VTRs');
-  console.log('💡 PAUSE is only available on HDW-S280 model');
-  console.log('🔄 Use STOP command instead for standard HDW series');
-  
-  // For standard HDW, use STOP instead of PAUSE
-  console.log('📤 Sending STOP command as alternative...');
-  return await sendVtrCommand(path, VTR_COMMANDS.STOP, 'STOP (PAUSE not available)');
-}
-
-/**
- * Stop command
- * @param {string} path - VTR port path
- */
-async function stopVtr(path) {
-  return await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
-}
-
-/**
- * Record command - DISABLED (20-02 is RECORD, which we're avoiding)
- * @param {string} path - VTR port path
- */
-async function recordVtr(path) {
-  console.log('⚠️  RECORD command is DISABLED');
-  console.log('💡 Note: RECORD is 20-02 which you requested to avoid');
-  console.log('🚫 This function will not send any command to prevent accidental recording');
-  
-  // DO NOT send any command - just log and return
-  return false;
-}
-
-/**
- * Fast Forward command
- * @param {string} path - VTR port path
- */
-async function fastForwardVtr(path) {
-  return await sendVtrCommand(path, Buffer.from([0x20, 0x10, 0x30]), 'FAST FORWARD');
-}
-
-/**
- * Rewind command
- * @param {string} path - VTR port path
- */
-async function rewindVtr(path) {
-  return await sendVtrCommand(path, Buffer.from([0x20, 0x20, 0x40]), 'REWIND'); // CORRECTED checksum!
-}
-
-/**
- * HDW-specific command functions
- */
-async function ejectTape(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.EJECT, 'EJECT');
-}
-
-async function jogForward(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.JOG_FORWARD_SLOW, 'JOG FORWARD SLOW');
-}
-
-async function jogReverse(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.JOG_REVERSE_SLOW, 'JOG REVERSE SLOW');
-}
-
-async function jogForwardFast(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.JOG_FORWARD_NORMAL, 'JOG FORWARD NORMAL');
-}
-
-async function jogReverseFast(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.JOG_REVERSE_NORMAL, 'JOG REVERSE NORMAL');
-}
-
-async function jogStill(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.JOG_FORWARD_STILL, 'JOG STILL');
-}
-
-async function shuttlePlus1(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.SHUTTLE_FORWARD_1X, 'SHUTTLE +1x');
-}
-
-async function shuttleMinus1(path) {
-  return await sendVtrCommand(path, VTR_COMMANDS.SHUTTLE_REVERSE_1X, 'SHUTTLE -1x');
-}
-
 async function getExtendedStatus(path) {
   console.log(`📊 Getting extended status from ${path}...`);
   
@@ -1125,6 +1033,6 @@ module.exports = {
   decodeTapeTimecode,
   testRealTapeTimecode,
   bcdToBin,
-  // Re-export transport functions
+  // ✅ Re-export transport functions from transport module
   ...require('../src/commands/vtr_cmds_transport')
 };
