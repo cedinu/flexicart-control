@@ -302,7 +302,7 @@ async function getDeviceType(path) {
 }
 
 /**
- * Get actual timecode from VTR
+ * Get actual timecode from VTR with HDW-specific parsing
  * @param {string} path - VTR port path
  * @returns {Promise<string>} Timecode string
  */
@@ -311,44 +311,54 @@ async function getVtrTimecode(path) {
     const response = await sendCommand(path, Buffer.from([0x74, 0x20, 0x54]), 3000);
     
     if (response && response.length >= 3) {
-      // Parse Sony 9-pin timecode response
-      // Format is usually: [0x91, 0x77, 0x00] for no timecode or all zeros
       const byte1 = response[0];
       const byte2 = response[1]; 
       const byte3 = response[2];
       
-      // Your VTR returns 91 77 00 which indicates no valid timecode
+      // Your VTR returns 91 77 00 which indicates no valid timecode source
       if (byte1 === 0x91 && byte2 === 0x77 && byte3 === 0x00) {
-        return '00:00:00:00'; // No timecode available
+        // Check if there's a longer response with actual timecode data
+        if (response.length >= 8) {
+          // Try to parse extended timecode format
+          const hours = response[3];
+          const minutes = response[4];
+          const seconds = response[5];
+          const frames = response[6];
+          
+          return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+        }
+        
+        return 'TC:UNAVAILABLE'; // Indicate no timecode source
       }
       
-      // For actual timecode, parse according to Sony protocol
-      // This would need the specific HDW timecode format
-      return '00:00:00:00'; // Placeholder for now
+      // For other responses, try to decode
+      // HDW timecode format may be different - need more investigation
+      return 'TC:UNKNOWN_FORMAT';
     }
     
-    return '00:00:00:00';
+    return 'TC:NO_RESPONSE';
   } catch (error) {
     console.debug(`Timecode request failed: ${error.message}`);
-    return '00:00:00:00';
+    return 'TC:ERROR';
   }
 }
 
-// Update checkSingleVtr to get real timecode
-// Update checkSingleVtr function to use the local version
+/**
+ * Check single VTR status without disrupting transport
+ */
 async function checkSingleVtr(path) {
   console.log(`\n🔍 Checking VTR at ${path}...`);
   
   try {
-    // Use your local enhanced version instead of imported one
-    const status = await getVtrStatus(path);
+    // Use non-destructive status check
+    const status = await getVtrStatusNonDestructive(path);
     
     if (status.error) {
       console.log(`❌ Error: ${status.error}`);
       return null;
     }
     
-    // Get actual timecode separately
+    // Get actual timecode separately (this also doesn't affect transport)
     const timecode = await getVtrTimecode(path);
     
     console.log(`✅ VTR Found!`);
@@ -1545,5 +1555,55 @@ function storeTransportState(path, response, command) {
   // This would integrate with your VtrStateManager  
   if (vtrState) {
     vtrState.updateTransportState(path, response, command);
+  }
+}
+
+/**
+ * Get VTR status WITHOUT sending transport commands (non-destructive)
+ * @param {string} path - VTR port path
+ * @returns {Promise<Object>} Status object
+ */
+async function getVtrStatusNonDestructive(path) {
+  try {
+    // Use ONLY status query - never send transport commands
+    const response = await sendCommand(path, Buffer.from([0x61, 0x20, 0x41]), 3000);
+    
+    if (!response || response.length === 0) {
+      return { error: 'No response from VTR', mode: 'UNKNOWN', timecode: '00:00:00:00', tape: false };
+    }
+    
+    // Check if we have recent transport state stored
+    const storedState = getStoredTransportState(path);
+    let mode = 'STOP'; // Default fallback
+    
+    if (storedState && (Date.now() - storedState.timestamp < 30000)) {
+      // Use stored transport state if recent (within 30 seconds)
+      mode = storedState.mode;
+      console.log(`📊 Using cached transport state: ${mode} (from ${storedState.lastCommand})`);
+    } else {
+      // Parse static status response - your VTR always returns cf d7 00
+      const responseHex = response.toString('hex');
+      if (responseHex === 'cfd700') {
+        mode = 'STOP'; // Static response indicates basic ready state
+      }
+      console.log(`📊 Using static status response: ${mode}`);
+    }
+    
+    return {
+      mode,
+      timecode: '00:00:00:00', // HDW doesn't provide real-time TC in basic status
+      tape: response.length > 0, // VTR responds = tape present
+      speed: '1x',
+      raw: response,
+      responseHex: response.toString('hex')
+    };
+    
+  } catch (error) {
+    return { 
+      error: error.message, 
+      mode: 'ERROR', 
+      timecode: '00:00:00:00', 
+      tape: false 
+    };
   }
 }
