@@ -991,6 +991,296 @@ async function testRealTapeTimecode(path) {
   }
 }
 
+/**
+ * Interactive VTR control function
+ * @param {string} path - VTR port path
+ */
+async function controlVtr(path) {
+  console.log(`🎛️ Interactive VTR Control for ${path}`);
+  console.log('=====================================');
+  console.log('Commands: play, stop, ff, rew, jog-fwd, jog-rev, jog-still, eject, status, debug-status, tc-test, tc-movement, tc-detailed, tc-tape, tc-real, quit');
+  
+  const readline = require('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: 'VTR> '
+  });
+  
+  rl.prompt();
+  
+  rl.on('line', async (input) => {
+    const command = input.trim().toLowerCase();
+    
+    try {
+      switch (command) {
+        case 'play':
+          await playVtr(path);
+          break;
+          
+        case 'stop':
+          await stopVtr(path);
+          break;
+          
+        case 'ff':
+        case 'fastforward':
+          await fastForwardVtr(path);
+          break;
+          
+        case 'rew':
+        case 'rewind':
+          await rewindVtr(path);
+          break;
+          
+        case 'jog-fwd':
+        case 'jog-forward':
+          await jogForward(path);
+          break;
+          
+        case 'jog-rev':
+        case 'jog-reverse':
+          await jogReverse(path);
+          break;
+          
+        case 'jog-still':
+          await jogStill(path);
+          break;
+          
+        case 'eject':
+          await ejectTape(path);
+          break;
+          
+        case 'status':
+          await checkSingleVtr(path);
+          break;
+          
+        case 'debug-status':
+          await debugStatusResponses(path);
+          break;
+          
+        case 'tc-test':
+          await testAllTimecodeCommands(path);
+          break;
+          
+        case 'tc-movement':
+          await testTimecodeMovement(path);
+          break;
+          
+        case 'tc-detailed':
+          const detailed = await getDetailedTimecode(path);
+          console.log(`📊 Detailed timecode: ${detailed}`);
+          break;
+          
+        case 'tc-tape':
+          await testTapeTimecodeCommands(path);
+          break;
+          
+        case 'tc-real':
+        case 'tc-real-test':
+          const realSources = await testRealTapeTimecode(path);
+          if (realSources.length > 0) {
+            console.log('\n🎯 Recommended timecode commands for real tape position:');
+            realSources.forEach(source => {
+              console.log(`   ${source.name}: ${source.command}`);
+            });
+          }
+          break;
+          
+        case 'quit':
+        case 'exit':
+          console.log('👋 Goodbye!');
+          rl.close();
+          process.exit(0);
+          break;
+          
+        case 'help':
+        case '?':
+          console.log('\n📋 Available Commands:');
+          console.log('Transport: play, stop, ff, rew, jog-fwd, jog-rev, jog-still, eject');
+          console.log('Status: status, debug-status');
+          console.log('Timecode: tc-test, tc-movement, tc-detailed, tc-tape, tc-real');
+          console.log('Control: quit, help');
+          break;
+          
+        default:
+          if (command) {
+            console.log(`❌ Unknown command: ${command}`);
+            console.log('💡 Type "help" for available commands');
+          }
+          break;
+      }
+    } catch (error) {
+      console.log(`❌ Command failed: ${error.message}`);
+    }
+    
+    rl.prompt();
+  });
+  
+  rl.on('close', () => {
+    console.log('\n👋 VTR control session ended');
+    process.exit(0);
+  });
+}
+
+/**
+ * Enhanced response analysis function
+ * @param {Buffer} response - Response buffer from VTR
+ * @param {string} commandName - Name of the command that generated this response
+ */
+function analyzeResponse(response, commandName) {
+  if (!response || response.length === 0) {
+    console.log(`📊 ${commandName} Analysis: No response`);
+    return;
+  }
+  
+  const hex = response.toString('hex');
+  const bytes = Array.from(response);
+  
+  console.log(`📊 ${commandName} Response Analysis:`);
+  console.log(`   Hex: ${hex}`);
+  console.log(`   Length: ${response.length} bytes`);
+  console.log(`   Bytes: [${bytes.map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
+  
+  // Try to interpret common response patterns
+  if (hex.startsWith('f77e')) {
+    console.log(`   🎯 Pattern: STOP mode detected`);
+  } else if (hex.startsWith('d7bd')) {
+    console.log(`   🎯 Pattern: PLAY mode detected`);
+  } else if (hex.startsWith('f79f')) {
+    console.log(`   🎯 Pattern: FAST_FORWARD mode detected`);
+  } else if (hex.startsWith('f7f7')) {
+    console.log(`   🎯 Pattern: REWIND mode detected`);
+  } else if (hex.startsWith('6f')) {
+    console.log(`   🎯 Pattern: JOG mode detected`);
+  } else {
+    console.log(`   ❓ Pattern: Unknown response pattern`);
+  }
+}
+
+/**
+ * Debug status responses with detailed analysis
+ * @param {string} path - VTR port path
+ */
+async function debugStatusResponses(path) {
+  console.log(`🔍 Debug status responses for ${path}...\n`);
+  
+  const statusCommands = [
+    { name: 'Basic Status', cmd: Buffer.from([0x61, 0x20, 0x41]) },
+    { name: 'Device Type', cmd: Buffer.from([0x00, 0x11, 0x11]) },
+    { name: 'Timecode', cmd: Buffer.from([0x74, 0x20, 0x54]) },
+    { name: 'LTC Timecode', cmd: Buffer.from([0x78, 0x20, 0x58]) },
+    { name: 'Timer1', cmd: Buffer.from([0x75, 0x20, 0x55]) }
+  ];
+  
+  for (const statusCmd of statusCommands) {
+    try {
+      console.log(`📤 Testing ${statusCmd.name}...`);
+      const response = await sendCommand(path, statusCmd.cmd, 3000);
+      
+      if (response && response.length > 0) {
+        analyzeResponse(response, statusCmd.name);
+        
+        // Try to decode if it looks like timecode
+        if (statusCmd.name.includes('Timecode') || statusCmd.name.includes('Timer')) {
+          const decoded = decodeTimecodeResponse(response, statusCmd.name);
+          if (decoded) {
+            console.log(`   🕐 Decoded: ${decoded}`);
+          }
+        }
+      } else {
+        console.log(`   ❌ No response`);
+      }
+      
+      console.log(''); // Empty line for readability
+      
+    } catch (error) {
+      console.log(`   ❌ Error: ${error.message}\n`);
+    }
+  }
+}
+
+/**
+ * Decode VTR status response
+ * @param {Buffer} response - Status response buffer
+ * @param {Object} options - Options for decoding
+ * @param {boolean} options.includeRaw - Include raw hex string in output
+ * @returns {Object} Decoded status object
+ */
+function decodeVtrStatusResponse(response, { includeRaw = true } = {}) {
+  if (!response || response.length < 2) {
+    return { error: 'Invalid response' };
+  }
+  
+  const bytes = Array.from(response);
+  const hex = response.toString('hex');
+  
+  // Basic status interpretation
+  const status = {
+    raw: hex,
+    bytes: bytes,
+    mode: 'UNKNOWN',
+    tape: false,
+    speed: '1x',
+    direction: 'FORWARD'
+  };
+  
+  // Interpret common patterns
+  if (hex.startsWith('f77e')) {
+    status.mode = 'STOP';
+  } else if (hex.startsWith('d7bd')) {
+    status.mode = 'PLAY';
+  } else if (hex.startsWith('f79f')) {
+    status.mode = 'FAST_FORWARD';
+  } else if (hex.startsWith('f7f7')) {
+    status.mode = 'REWIND';
+  } else if (hex.startsWith('6f')) {
+    status.mode = 'JOG';
+  }
+  
+  return status;
+}
+
+/**
+ * Get command buffer for a given command name
+ * @param {string} commandName - Name of the command
+ * @returns {Buffer|null} Command buffer or null if not found
+ */
+function getCommandBuffer(commandName) {
+  const upperName = commandName.toUpperCase();
+  
+  if (VTR_COMMANDS[upperName]) {
+    return VTR_COMMANDS[upperName];
+  }
+  
+  if (VTR_COMMANDS_CORRECTED[upperName]) {
+    return VTR_COMMANDS_CORRECTED[upperName];
+  }
+  
+  return null;
+}
+
+/**
+ * Get VTR status (non-destructive method)
+ * @param {string} path - VTR port path
+ * @returns {Promise<Object>} Status object
+ */
+async function getVtrStatusNonDestructive(path) {
+  try {
+    const response = await sendCommand(path, Buffer.from([0x61, 0x20, 0x41]), 3000);
+    
+    if (!response || response.length === 0) {
+      return { error: 'No response from VTR' };
+    }
+    
+    const status = decodeVtrStatusResponse(response);
+    status.timecode = await getVtrTimecode(path);
+    
+    return status;
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
 // Export functions for use by other modules
 module.exports = {
   checkSingleVtr,
