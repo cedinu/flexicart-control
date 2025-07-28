@@ -1,5 +1,32 @@
 const { autoScanVtrs, getVtrStatus, VTR_PORTS, humanizeStatus, sendCommand } = require('../src/commands/vtr_interface');
 
+// Import transport functions from the new module
+const {
+  playVtr,
+  pauseVtr,
+  stopVtr,
+  recordVtr,
+  fastForwardVtr,
+  rewindVtr,
+  ejectTape,
+  jogForward,
+  jogReverse,
+  jogForwardFast,
+  jogReverseFast,
+  jogStill,
+  shuttlePlus1,
+  shuttleMinus1,
+  testVtrTransportCommands,
+  batchControlVtrs,
+  sendVtrTransportCommand,
+  interpretVtrResponse,
+  getStoredTransportState,
+  storeTransportState,
+  clearTransportState,
+  VTR_TRANSPORT_COMMANDS,
+  VtrTransportError
+} = require('../src/commands/vtr_cmds_transport');
+
 /**
  * Calculate simple Sony 9-pin checksum (XOR of all bytes)
  */
@@ -119,40 +146,7 @@ const VTR_COMMANDS_SIMPLE = {
  * }
  */
 async function sendVtrCommand(path, command, commandName) {
-  try {
-    const response = await sendCommand(path, command, 3000);
-    
-    if (!response || response.length === 0) {
-      throw new VtrError(`No response received for ${commandName}`, 'NO_RESPONSE', path);
-    }
-    
-    // Update state manager
-    vtrState.updateTransportState(path, response, commandName);
-    
-    const mode = interpretVtrResponse(response.toString('hex'));
-    console.log(`📤 Sending ${commandName} command to ${path}...`);
-    console.log(`✅ ${commandName} command sent successfully`);
-    console.log(`📥 Response: ${response.toString('hex')} (${response.length} bytes)`);
-    console.log(`📊 New status: ${mode} - TC: 00:00:00:00`);
-    
-    return {
-      success: true,
-      response,
-      mode,
-      timestamp: new Date().toISOString()
-    };
-    
-  } catch (error) {
-    const vtrError = error instanceof VtrError ? error : 
-      new VtrError(`${commandName} failed: ${error.message}`, 'COMMAND_FAILED', path);
-    
-    console.log(`❌ ${vtrError.message}`);
-    return {
-      success: false,
-      error: vtrError,
-      timestamp: new Date().toISOString()
-    };
-  }
+  return await sendVtrTransportCommand(path, command, commandName);
 }
 
 /**
@@ -976,1025 +970,6 @@ function decodeTimecodeResponse(response, commandName) {
 }
 
 /**
- * Interactive VTR control
- */
-async function controlVtr(path) {
-  console.log(`🎛️ Interactive VTR Control for ${path}`);
-  console.log('=====================================');
-  console.log('Commands: play, stop, ff, rew, jog-fwd, jog-rev, jog-still, eject, status, debug-status, tc-test, tc-movement, tc-detailed, quit');
-  
-  const readline = require('readline');
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-  });
-  
-  const prompt = () => {
-    rl.question('VTR> ', async (answer) => {
-      const cmd = answer.trim().toLowerCase();
-      
-      try {
-        switch (cmd) {
-          case 'play':
-            await playVtr(path);
-            break;
-          case 'stop':
-            await stopVtr(path);
-            break;
-          case 'ff':
-            await fastForwardVtr(path);
-            break;
-          case 'rew':
-            await rewindVtr(path);
-            break;
-          case 'jog-fwd':
-          case 'jog-forward':
-            await jogForward(path);
-            break;
-          case 'jog-rev':
-          case 'jog-reverse':
-            await jogReverse(path);
-            break;
-          case 'jog-still':
-            await jogStill(path);
-            break;
-          case 'eject':
-            await ejectTape(path);
-            break;
-          case 'status':
-            await checkSingleVtr(path);
-            break;
-          case 'debug':
-          case 'debug-status':
-            await debugStatusResponses(path);
-            break;
-          case 'tc-test':
-            await testAllTimecodeCommands(path);
-            break;
-          case 'tc-movement':
-            await testTimecodeMovement(path);
-            break;
-          case 'tc-detailed':
-            const detailed = await getDetailedTimecode(path);
-            console.log(`📊 Detailed timecode: ${detailed}`);
-            break;
-          case 'tc-tape':
-            await testTapeTimecodeCommands(path);
-            break;
-          case 'tc-real':
-            // Test for the real advancing timecode
-            console.log('🎬 Searching for real tape timecode...');
-            await testTapeTimecodeCommands(path);
-            break;
-          case 'quit':
-          case 'exit':
-            rl.close();
-            return;
-          default:
-            console.log('Unknown command. Available: play, stop, ff, rew, jog-fwd, jog-rev, jog-still, eject, status, debug-status, tc-test, tc-movement, tc-detailed, quit');
-        }
-      } catch (error) {
-        console.log(`❌ Command failed: ${error.message}`);
-      }
-      
-      prompt();
-    });
-  };
-  
-  prompt();
-}
-
-/**
- * Interactive command line interface
- */
-async function interactiveCheck() {
-  const args = process.argv.slice(2);
-  
-  if (args.length === 0) {
-    console.log('🎬 VTR Status Checker & Controller');
-    console.log('==================================');
-    console.log('Usage:');
-    console.log('  node check_vtr_status.js <port>                    # Check single VTR');
-    console.log('  node check_vtr_status.js --scan                    # Scan all ports');
-    console.log('  node check_vtr_status.js --play <port>             # Send PLAY command');
-    console.log('  node check_vtr_status.js --stop <port>             # Send STOP command');
-    console.log('  node check_vtr_status.js --pause <port>            # Send PAUSE command');
-    console.log('  node check_vtr_status.js --jog-forward <port>      # Send JOG FORWARD command');
-    console.log('  node check_vtr_status.js --jog-reverse <port>      # Send JOG REVERSE command');
-    console.log('  node check_vtr_status.js --jog-still <port>        # Send JOG STILL command');
-    console.log('  node check_vtr_status.js --control <port>          # Interactive control');
-    console.log('  node check_vtr_status.js --raw <port> "20 01 21"   # Send raw command');
-    return;
-  }
-  
-  const command = args[0];
-  const port = args[1];
-  const rawCommand = args[2];
-  
-  console.log('🎬 VTR Status Checker & Controller');
-  console.log('==================================');
-  
-  try {
-    switch (command) {
-      case '--scan':
-        await scanAllVtrs();
-        break;
-      case '--play':
-        if (!port) {
-          console.log('❌ Port required for --play');
-          return;
-        }
-        await playVtr(port);
-        break;
-      case '--stop':
-        if (!port) {
-          console.log('❌ Port required for --stop');
-          return;
-        }
-        await stopVtr(port);
-        break;
-      case '--pause':
-        if (!port) {
-          console.log('❌ Port required for --pause');
-          return;
-        }
-        await pauseVtr(port);
-        break;
-      case '--jog-forward':
-      case '--jog-fwd':
-        if (!port) {
-          console.log('❌ Port required for --jog-forward');
-          return;
-        }
-        await jogForward(port);
-        break;
-      case '--jog-reverse':
-      case '--jog-rev':
-        if (!port) {
-          console.log('❌ Port required for --jog-reverse');
-          return;
-        }
-        await jogReverse(port);
-        break;
-      case '--jog-still':
-        if (!port) {
-          console.log('❌ Port required for --jog-still');
-          return;
-        }
-        await jogStill(port);
-        break;
-      case '--jog-fast-forward':
-        if (!port) {
-          console.log('❌ Port required for --jog-fast-forward');
-          return;
-        }
-        await jogForwardFast(port);
-        break;
-      case '--jog-fast-reverse':
-        if (!port) {
-          console.log('❌ Port required for --jog-fast-reverse');
-          return;
-        }
-        await jogReverseFast(port);
-        break;
-      case '--control':
-        if (!port) {
-          console.log('❌ Port required for --control');
-          return;
-        }
-        await controlVtr(port);
-        break;
-      case '--raw':
-        if (!port || !rawCommand) {
-          console.log('❌ Port and command required for --raw');
-          return;
-        }
-        await sendRawCommand(port, rawCommand);
-        break;
-      default:
-        // Check if it's a port path (not starting with --)
-        if (!command.startsWith('--')) {
-          await checkSingleVtr(command);
-        } else {
-          console.log(`❌ Unknown command: ${command}`);
-          console.log('Use "node check_vtr_status.js" to see available commands');
-        }
-        break;
-    }
-  } catch (error) {
-    console.error('❌ Error:', error.message);
-    process.exit(1);
-  }
-}
-
-/**
- * Interpret VTR response hex string to determine mode
- * @param {string} responseHex - Hex string response
- * @returns {string} Detected mode
- */
-function interpretVtrResponse(responseHex) {
-  const VTR_RESPONSE_PATTERNS = {
-    'f77e': 'STOP',
-    'd7bd': 'PLAY',
-    'f79f': 'FAST_FORWARD', 
-    'f7f7': 'REWIND',
-    '6f77': 'JOG_FORWARD',
-    '6f6f': 'JOG_REVERSE'
-  };
-  
-  for (const [pattern, mode] of Object.entries(VTR_RESPONSE_PATTERNS)) {
-    if (responseHex.startsWith(pattern)) {
-      // Special case for JOG_STILL detection
-      if (pattern === '6f77' && responseHex.includes('3e')) {
-        return 'JOG_STILL';
-      }
-      return mode;
-    }
-  }
-  return 'UNKNOWN';
-}
-
-/**
- * Analyze VTR response
- */
-function analyzeResponse(response, commandName) {
-  if (!response || response.length === 0) {
-    console.log(`🔍 No response to analyze for ${commandName}`);
-    return;
-  }
-  
-  console.log(`🔍 Analyzing response for ${commandName}:`);
-  console.log(`   📊 Length: ${response.length} bytes`);
-  console.log(`   📊 Hex: ${response.toString('hex')}`);
-  console.log(`   📊 Bytes: [${Array.from(response).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
-  console.log(`   📊 Decimal: [${Array.from(response).join(', ')}]`);
-  console.log(`   📊 Binary: ${Array.from(response).map(b => b.toString(2).padStart(8, '0')).join(' ')}`);
-  
-  // Basic analysis
-  if (response.length > 0) {
-    const firstByte = response[0];
-    console.log(`   🔸 First byte: 0x${firstByte.toString(16)} (${firstByte})`);
-    
-    if (response.length > 1) {
-      const secondByte = response[1];
-      console.log(`   🔸 Second byte: 0x${secondByte.toString(16)} (${secondByte})`);
-    }
-    
-    // Determine response type
-    if (firstByte >= 0x80) {
-      console.log(`   📊 STATUS DATA - Response contains status information`);
-    } else if (firstByte === 0x10) {
-      console.log(`   ✅ ACK - Command acknowledged`);
-    } else if (firstByte === 0x11) {
-      console.log(`   ❌ NAK - Command not acknowledged`);
-    }
-    
-    if (response.length > 2) {
-      console.log(`   📈 Additional bytes:`);
-      for (let i = 2; i < response.length; i++) {
-        console.log(`     Byte ${i}: 0x${response[i].toString(16)} (${response[i]})`);
-      }
-    }
-  }
-}
-
-/**
- * Decode VTR status responses based on command type
- */
-function decodeVtrStatusResponse(response, commandType) {
-  if (!response || response.length === 0) return null;
-  
-  console.log(`🔍 Decoding ${commandType} response:`);
-  
-  switch(commandType.toLowerCase()) {
-    case 'stop':
-      if (response.length >= 3) {
-        // Based on your "f7 7e f8" response
-        const status1 = response[0]; // 0xF7 = Transport status
-        const status2 = response[1]; // 0x7E = Mode status  
-        const status3 = response[2]; // 0xF8 = Additional status
-        
-        console.log(`   🛑 Transport Status: 0x${status1.toString(16)} (${status1})`);
-        console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
-        console.log(`   🎛️  Additional Status: 0x${status3.toString(16)} (${status3})`);
-        
-        // Decode transport bits (0xF7 = 11110111)
-        if (status1 & 0x80) console.log(`     - Status response active`);
-        if (status1 & 0x40) console.log(`     - Servo system active`);
-        if (status1 & 0x20) console.log(`     - Tape loaded`);
-        if (status1 & 0x10) console.log(`     - Transport ready`);
-        
-        return { mode: 'STOP', transport: status1, modeStatus: status2, additional: status3 };
-      }
-      break;
-      
-    case 'play':
-      if (response.length >= 2) {
-        // Based on your "d7 bd" response
-        const status1 = response[0]; // 0xD7 = Transport status
-        const status2 = response[1]; // 0xBD = Mode status
-        
-        console.log(`   🎮 Transport Status: 0x${status1.toString(16)} (${status1})`);
-        console.log(`   📊 Mode Status: 0x${status2.toString(16)} (${status2})`);
-        
-        // Decode transport bits (0xD7 = 11010111)
-        if (status1 & 0x80) console.log(`     - Status response active`);
-        if (status1 & 0x40) console.log(`     - Play mode indication`);
-        if (status1 & 0x20) console.log(`     - Tape loaded`);
-        if (status1 & 0x10) console.log(`     - Direction forward`);
-        
-        return { mode: 'PLAY', transport: status1, modeStatus: status2 };
-      }
-      break;
-      
-    case 'device type':
-      if (response.length >= 3) {
-        // Based on your "ba ba e0" response
-        const deviceId = response[0];   // 0xBA = HDW Series
-        const subType = response[1];    // 0xBA = Model variant
-        const version = response[2];    // 0xE0 = Version info
-        
-        console.log(`   📺 Device ID: 0x${deviceId.toString(16)} (${deviceId})`);
-        console.log(`   📺 Sub-type: 0x${subType.toString(16)} (${subType})`);
-        console.log(`   📺 Version: 0x${version.toString(16)} (${version})`);
-        
-        let deviceName = 'Unknown';
-        if (deviceId === 0xBA) {
-          deviceName = 'HDW Series VTR (confirmed working)';
-        }
-        
-        console.log(`   📺 Identified as: ${deviceName}`);
-        return { deviceId, subType, version, deviceName, raw: response };
-      }
-      break;
-      
-    case 'status':
-      if (response.length >= 3) {
-        // Based on your "cf d7 00" response
-        const status1 = response[0]; // 0xCF = Transport status
-        const status2 = response[1]; // 0xD7 = Mode status
-        const status3 = response[2]; // 0x00 = Additional data
-        
-        console.log(`   📊 Status Byte 1: 0x${status1.toString(16)} (${status1})`);
-        console.log(`   📊 Status Byte 2: 0x${status2.toString(16)} (${status2})`);
-        console.log(`   📊 Status Byte 3: 0x${status3.toString(16)} (${status3})`);
-        
-        return { status1, status2, status3, raw: response };
-      }
-      break;
-      
-    case 'jog forward':
-    case 'jog reverse':
-    case 'jog':
-      if (response.length >= 4) {
-        // Based on your "6f 77 xx xx" responses
-        const status1 = response[0]; // 0x6F = JOG status indicator
-        const status2 = response[1]; // 0x77 = Direction/mode
-        const status3 = response[2]; // Variable speed data
-        const status4 = response[3]; // Additional speed data
-        
-        console.log(`   🎮 JOG Status 1: 0x${status1.toString(16)} (${status1})`);
-        console.log(`   🎮 JOG Status 2: 0x${status2.toString(16)} (${status2})`);
-        console.log(`   🎮 Speed Data 1: 0x${status3.toString(16)} (${status3})`);
-        console.log(`   🎮 Speed Data 2: 0x${status4.toString(16)} (${status4})`);
-        
-        // Determine direction from status2
-        const direction = status2 === 0x77 ? 'FORWARD' : (status2 === 0x6F ? 'REVERSE' : 'UNKNOWN');
-        console.log(`   🎮 JOG Direction: ${direction}`);
-        
-        return { mode: 'JOG', direction, status1, status2, status3, status4, raw: response };
-      }
-      break;
-  }
-  
-  return { raw: response };
-}
-
-// Add this function to debug HDW status responses
-async function debugStatusResponses(path) {
-  console.log(`🩺 Debugging HDW status responses for ${path}...`);
-  
-  const statusCommands = [
-    { name: 'Basic Status', cmd: Buffer.from([0x61, 0x20, 0x41]) },
-    { name: 'Timecode', cmd: Buffer.from([0x74, 0x20, 0x54]) },
-    { name: 'Timer Status', cmd: Buffer.from([0x75, 0x20, 0x55]) }
-  ];
-  
-  for (const cmd of statusCommands) {
-    try {
-      console.log(`\n📤 Testing ${cmd.name}...`);
-      const response = await sendCommand(path, cmd.cmd, 3000);
-      console.log(`📥 ${cmd.name} Response: ${response.toString('hex')} (${response.length} bytes)`);
-      
-      // Decode the response in detail
-      if (response.length >= 3) {
-        const byte1 = response[0];
-        const byte2 = response[1];
-        const byte3 = response[2];
-        
-        console.log(`   Byte 1: 0x${byte1.toString(16)} (${byte1}) Binary: ${byte1.toString(2).padStart(8, '0')}`);
-        console.log(`   Byte 2: 0x${byte2.toString(16)} (${byte2}) Binary: ${byte2.toString(2).padStart(8, '0')}`);
-        console.log(`   Byte 3: 0x${byte3.toString(16)} (${byte3}) Binary: ${byte3.toString(2).padStart(8, '0')}`);
-        
-        // HDW-specific status bit analysis
-        console.log(`   HDW Status Analysis:`);
-        console.log(`   Byte 1 (0x${byte1.toString(16)}):`);
-        if (byte1 & 0x80) console.log(`     - Bit 7: Status data present ✅`);
-        if (byte1 & 0x40) console.log(`     - Bit 6: Transport active`);
-        if (byte1 & 0x20) console.log(`     - Bit 5: Possibly tape present`);
-        if (byte1 & 0x10) console.log(`     - Bit 4: Direction/ready flag`);
-        if (byte1 & 0x08) console.log(`     - Bit 3: Mode flag`);
-        if (byte1 & 0x04) console.log(`     - Bit 2: Speed flag`);
-        if (byte1 & 0x02) console.log(`     - Bit 1: Control flag`);
-        if (byte1 & 0x01) console.log(`     - Bit 0: Status flag`);
-        
-        console.log(`   Byte 2 (0x${byte2.toString(16)}):`);
-        if (byte2 & 0x80) console.log(`     - Bit 7: Additional status ✅`);
-        if (byte2 & 0x40) console.log(`     - Bit 6: Mode/transport flag`);
-        if (byte2 & 0x20) console.log(`     - Bit 5: Servo/control flag`);
-        if (byte2 & 0x10) console.log(`     - Bit 4: Direction flag`);
-        if (byte2 & 0x08) console.log(`     - Bit 3: Speed indicator`);
-        if (byte2 & 0x04) console.log(`     - Bit 2: Transport mode`);
-        if (byte2 & 0x02) console.log(`     - Bit 1: Status indicator`);
-        if (byte2 & 0x01) console.log(`     - Bit 0: Ready flag`);
-        
-        // Interpret the status based on common patterns
-        interpretHdwStatus(byte1, byte2, byte3);
-      }
-      
-    } catch (error) {
-      console.log(`❌ ${cmd.name}: ${error.message}`);
-    }
-  }
-}
-
-// Add HDW status interpreter
-function interpretHdwStatus(byte1, byte2, byte3) {
-  console.log(`   🔍 HDW Status Interpretation:`);
-  
-  // Based on your consistent CF D7 00 response
-  if (byte1 === 0xCF && byte2 === 0xD7 && byte3 === 0x00) {
-    console.log(`     📊 Standard STOP mode detected`);
-    console.log(`     💾 Tape status: Likely IN (based on response pattern)`);
-    console.log(`     🎛️  VTR ready for commands`);
-    return { mode: 'STOP', tape: true, ready: true };
-  }
-  
-  // General interpretation
-  let mode = 'UNKNOWN';
-  let tape = false;
-  let ready = false;
-  
-  // Try to determine mode from bit patterns
-  if ((byte1 & 0x40) && (byte2 & 0x40)) {
-    mode = 'ACTIVE_TRANSPORT';
-  } else if (byte1 & 0x80) {
-    mode = 'READY';
-  }
-  
-  // Try to determine tape presence
-  if (byte2 & 0x80) {
-    tape = true;
-  }
-  
-  // Try to determine ready state
-  if (byte1 & 0x80) {
-    ready = true;
-  }
-  
-  console.log(`     ⚡ Interpreted Mode: ${mode}`);
-  console.log(`     💾 Interpreted Tape: ${tape ? 'IN' : 'OUT'}`);
-  console.log(`     🎛️  Interpreted Ready: ${ready ? 'YES' : 'NO'}`);
-  
-  return { mode, tape, ready };
-}
-
-/**
- * Batch control multiple VTRs
- */
-async function batchControlVtrs(ports, command) {
-  console.log(`🎛️ Sending ${command} to ${ports.length} VTRs...`);
-  
-  const results = [];
-  for (const port of ports) {
-    try {
-      let result;
-      switch (command.toLowerCase()) {
-        case 'play':
-          result = await playVtr(port);
-          break;
-        case 'stop':
-          result = await stopVtr(port);
-          break;
-        case 'ff':
-        case 'fastforward':
-          result = await fastForwardVtr(port);
-          break;
-        case 'rew':
-        case 'rewind':
-          result = await rewindVtr(port);
-          break;
-        // Remove pause and record cases
-        default:
-          throw new Error(`Unknown command: ${command}. Available: play, stop, ff, rew`);
-      }
-      results.push({ port, success: result });
-    } catch (error) {
-      results.push({ port, success: false, error: error.message });
-    }
-  }
-  
-  return results;
-}
-
-// New SONY_9PIN_COMMANDS object
-const SONY_9PIN_COMMANDS = {
-  transport: {
-    STOP: { bytes: [0x20, 0x00], checksum: 0x20, description: 'Stop transport' },
-    PLAY: { bytes: [0x20, 0x01], checksum: 0x21, description: 'Play forward' },
-    FAST_FORWARD: { bytes: [0x20, 0x10], checksum: 0x30, description: 'Fast forward' },
-    REWIND: { bytes: [0x20, 0x20], checksum: 0x40, description: 'Rewind' },
-  },
-  
-  variable: {
-    JOG_FORWARD_STILL: { bytes: [0x21, 0x11, 0x00], checksum: 0x30, description: 'Jog forward still' },
-    JOG_FORWARD_SLOW: { bytes: [0x21, 0x11, 0x20], checksum: 0x10, description: 'Jog forward slow' },
-    JOG_FORWARD_NORMAL: { bytes: [0x21, 0x11, 0x40], checksum: 0x30, description: 'Jog forward normal' },
-  },
-  
-  system: {
-    LOCAL_DISABLE: { bytes: [0x00, 0x0C], checksum: 0x0C, description: 'Disable local control' },
-    DEVICE_TYPE: { bytes: [0x00, 0x11], checksum: 0x11, description: 'Request device type' },
-    STATUS: { bytes: [0x61, 0x20], checksum: 0x41, description: 'Request status' },
-  }
-};
-
-function getCommandBuffer(category, command) {
-  const cmd = SONY_9PIN_COMMANDS[category]?.[command];
-  if (!cmd) {
-    throw new VtrError(`Unknown command: ${category}.${command}`, 'UNKNOWN_COMMAND');
-  }
-  
-  return Buffer.from([...cmd.bytes, cmd.checksum]);
-}
-
-// Usage:
-const playCommand = getCommandBuffer('transport', 'PLAY');
-const statusCommand = getCommandBuffer('system', 'STATUS');
-
-/*
- * Sony 9-pin Variable Speed Data Values:
- * SPEED = 0x00 (0)    = STILL
- * SPEED = 0x20 (32)   = 0.1x normal speed  
- * SPEED = 0x40 (64)   = 1.0x normal speed
- * SPEED = 0x4F (79)   = About 2.9x normal speed
- * 
- * Variable Speed Command Format: [CMD1, CMD2, SPEED, CHECKSUM]
- * Example: JOG FWD slow = [0x21, 0x11, 0x20, 0x10]
- */
-
-/**
- * Call the main function if this file is run directly
- */
-if (require.main === module) {
-  interactiveCheck().catch(error => {
-    console.error('❌ Error:', error.message);
-    process.exit(1);
-  });
-}
-
-
-
-class VtrError extends Error {
-  constructor(message, code, path) {
-    super(message);
-    this.name = 'VtrError';
-    this.code = code;
-    this.path = path;
-  }
-}
-
-class VtrLogger {
-  static info(message, data = {}) {
-    console.log(`[INFO] ${message}`, data.path ? `(${data.path})` : '', data.extra || '');
-  }
-  
-  static success(message, data = {}) {
-    console.log(`[SUCCESS] ✅ ${message}`, data.path ? `(${data.path})` : '', data.extra || '');
-  }
-  
-  static error(message, data = {}) {
-    console.log(`[ERROR] ❌ ${message}`, data.path ? `(${data.path})` : '', data.error || '');
-  }
-  
-  static command(command, path, direction = 'out') {
-    const arrow = direction === 'out' ? '📤' : '📥';
-    console.log(`[COMMAND] ${arrow} ${command} → ${path}`);
-  }
-  
-  static response(response, path) {
-    console.log(`[RESPONSE] 📥 ${path}: ${response.toString('hex')} (${response.length} bytes)`);
-  }
-}
-
-class VtrStateManager {
-  constructor() {
-    this.portStates = new Map();
-  }
-  
-  updateTransportState(path, response, command, timestamp = Date.now()) {
-    this.portStates.set(path, {
-      lastResponse: response,
-      lastCommand: command,
-      timestamp,
-      mode: interpretVtrResponse(response.toString('hex'))
-    });
-  }
-  
-  getPortState(path) {
-    return this.portStates.get(path) || null;
-  }
-  
-  clearPortState(path) {
-    this.portStates.delete(path);
-  }
-}
-
-const vtrState = new VtrStateManager();
-
-// Remove global state usage and use the state manager instead
-function getStoredTransportState(path) {
-  // This would integrate with your VtrStateManager
-  return vtrState?.getPortState(path) || null;
-}
-
-function storeTransportState(path, response, command) {
-  // This would integrate with your VtrStateManager  
-  if (vtrState) {
-    vtrState.updateTransportState(path, response, command);
-  }
-}
-
-/**
- * Get VTR status WITHOUT sending transport commands (non-destructive)
- * @param {string} path - VTR port path
- * @returns {Promise<Object>} Status object
- */
-async function getVtrStatusNonDestructive(path) {
-  try {
-    // Use ONLY status query - never send transport commands
-    const response = await sendCommand(path, Buffer.from([0x61, 0x20, 0x41]), 3000);
-    
-    if (!response || response.length === 0) {
-      return { error: 'No response from VTR', mode: 'UNKNOWN', timecode: '00:00:00:00', tape: false };
-    }
-    
-    // Check if we have recent transport state stored
-    const storedState = getStoredTransportState(path);
-    let mode = 'STOP'; // Default fallback
-    
-    if (storedState && (Date.now() - storedState.timestamp < 30000)) {
-      // Use stored transport state if recent (within 30 seconds)
-    } else {
-      // Parse static status response - your VTR always returns cf d7 00
-      const responseHex = response.toString('hex');
-      if (responseHex === 'cfd700') {
-        mode = 'STOP'; // Static response indicates basic ready state
-      }
-      console.log(`📊 Using static status response: ${mode}`);
-    }
-    
-    return {
-      mode,
-      timecode: '00:00:00:00', // HDW doesn't provide real-time TC in basic status
-      tape: response.length > 0, // VTR responds = tape present
-      speed: '1x',
-      raw: response,
-      responseHex: response.toString('hex')
-    };
-    
-  } catch (error) {
-    return { 
-      error: error.message, 
-      mode: 'ERROR', 
-      timecode: '00:00:00:00', 
-      tape: false 
-    };
-  }
-}
-
-/**
- * Test if timecode advances during different transport modes
- * @param {string} path - VTR port path
- */
-async function testTimecodeAdvancement(path) {
-  console.log('🎬 Testing timecode advancement during transport...\n');
-  
-  try {
-    // Establish baseline
-    console.log('📤 Getting baseline timecode...');
-    const baseline = await getComprehensiveTimecode(path);
-    console.log(`📊 Baseline LTC: ${baseline.ltc}`);
-    console.log(`📊 Baseline Timer1: ${baseline.timer1}\n`);
-    
-    // Test PLAY mode
-    console.log('📤 Testing PLAY advancement...');
-    await sendVtrCommand(path, Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
-    
-    // Sample multiple times to detect movement
-    const samples = [];
-    for (let i = 0; i < 3; i++) {
-      await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
-      const sample = await getComprehensiveTimecode(path);
-      samples.push(sample);
-      console.log(`📊 PLAY Sample ${i + 1}: LTC:${sample.ltc} | T1:${sample.timer1}`);
-    }
-    
-    // Check if any samples show advancement
-    const ltcValues = samples.map(s => s.ltc).filter(tc => tc && tc !== 'N/A');
-    const timer1Values = samples.map(s => s.timer1).filter(tc => tc && tc !== 'N/A');
-    
-    const ltcAdvanced = new Set(ltcValues).size > 1;
-    const timer1Advanced = new Set(timer1Values).size > 1;
-    
-    console.log(`\n📊 Analysis:`);
-    console.log(`   LTC Advanced: ${ltcAdvanced ? '✅ YES' : '❌ NO'}`);
-    console.log(`   Timer1 Advanced: ${timer1Advanced ? '✅ YES' : '❌ NO'}`);
-    
-    if (!ltcAdvanced && !timer1Advanced) {
-      console.log(`\n⚠️  Timecode is not advancing during PLAY. Possible causes:`);
-      console.log(`   1. Tape is not actually moving (mechanical issue)`);
-      console.log(`   2. No timecode recorded on tape`);
-      console.log(`   3. Timecode reader needs adjustment`);
-      console.log(`   4. VTR servo/transport system issue`);
-      
-      // Test fast forward to see if that moves timecode
-      console.log(`\n📤 Testing FAST FORWARD...`);
-      await sendVtrCommand(path, Buffer.from([0x20, 0x10, 0x30]), 'FAST FORWARD');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const ffSample = await getComprehensiveTimecode(path);
-      console.log(`📊 FF Sample: LTC:${ffSample.ltc} | T1:${ffSample.timer1}`);
-    }
-    
-    // Stop transport
-    console.log(`\n📤 Stopping...`);
-    await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
-    
-  } catch (error) {
-    console.log(`❌ Timecode advancement test failed: ${error.message}`);
-  }
-}
-
-/**
- * Get comprehensive timecode information from all working sources
- * @param {string} path - VTR port path
- * @returns {Promise<Object>} Timecode object with multiple sources
- */
-async function getComprehensiveTimecode(path) {
-  const timecodeData = {
-    ltc: null,
-    timer1: null,
-    primary: null,
-    isAdvancing: false,
-    raw: {}
-  };
-  
-  try {
-    // Get LTC timecode (working)
-    const ltcResponse = await sendCommand(path, Buffer.from([0x78, 0x20, 0x58]), 1000);
-    if (ltcResponse && ltcResponse.length >= 3) {
-      timecodeData.ltc = decodeTimecodeResponse(ltcResponse, 'LTC');
-      timecodeData.raw.ltc = ltcResponse.toString('hex');
-    }
-    
-    // Get Timer1 timecode (working)
-    const timer1Response = await sendCommand(path, Buffer.from([0x75, 0x20, 0x55]), 1000);
-    if (timer1Response && timer1Response.length >= 3) {
-      timecodeData.timer1 = decodeTimecodeResponse(timer1Response, 'Timer1');
-      timecodeData.raw.timer1 = timer1Response.toString('hex');
-    }
-    
-    // Determine primary timecode source
-    if (timecodeData.ltc && timecodeData.ltc !== 'N/A') {
-      timecodeData.primary = timecodeData.ltc;
-    } else if (timecodeData.timer1 && timecodeData.timer1 !== 'N/A') {
-      timecodeData.primary = timecodeData.timer1;
-    } else {
-      timecodeData.primary = 'TC:UNAVAILABLE';
-    }
-    
-    return timecodeData;
-    
-  } catch (error) {
-    timecodeData.primary = 'TC:ERROR';
-    return timecodeData;
-  }
-}
-
-/**
- * Test all Sony 9-pin timecode commands
- * @param {string} path - VTR port path
- */
-async function testAllTimecodeCommands(path) {
-  console.log('🕐 Testing all Sony 9-pin timecode commands...\n');
-  
-  const timecodeCommands = [
-    // Standard Sony 9-pin timecode commands
-    { name: 'Current Time Data', cmd: Buffer.from([0x74, 0x20, 0x54]), format: 'Standard TC request' },
-    { name: 'LTC Time Data', cmd: Buffer.from([0x78, 0x20, 0x58]), format: 'LTC timecode' },
-    { name: 'VITC Time Data', cmd: Buffer.from([0x79, 0x20, 0x59]), format: 'VITC timecode' },
-    { name: 'Timer 1', cmd: Buffer.from([0x75, 0x20, 0x55]), format: 'Timer 1 data' },
-    { name: 'Timer 2', cmd: Buffer.from([0x76, 0x20, 0x56]), format: 'Timer 2 data' },
-    { name: 'User Bits', cmd: Buffer.from([0x77, 0x20, 0x57]), format: 'User bits data' },
-    
-    // Extended timecode commands
-    { name: 'TC Generator', cmd: Buffer.from([0x7A, 0x20, 0x5A]), format: 'TC generator data' },
-    { name: 'UB Generator', cmd: Buffer.from([0x7B, 0x20, 0x5B]), format: 'UB generator data' },
-    
-    // Alternative status with timecode
-    { name: 'Extended Status', cmd: Buffer.from([0x60, 0x20, 0x40]), format: 'Extended status' },
-    { name: 'Full Status', cmd: Buffer.from([0x63, 0x20, 0x43]), format: 'Full status block' },
-    
-    // HDW-specific commands (if any)
-    { name: 'HDW Position', cmd: Buffer.from([0x71, 0x20, 0x51]), format: 'Position data' },
-    { name: 'Search Data', cmd: Buffer.from([0x72, 0x20, 0x52]), format: 'Search position' }
-  ];
-  
-  for (const tcCmd of timecodeCommands) {
-    try {
-      console.log(`📤 Testing ${tcCmd.name} (${tcCmd.format})...`);
-      console.log(`   Command: ${tcCmd.cmd.toString('hex')}`);
-      
-      const response = await sendCommand(path, tcCmd.cmd, 3000);
-      
-      if (response && response.length > 0) {
-        console.log(`✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
-        console.log(`   Bytes: [${Array.from(response).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ')}]`);
-        console.log(`   ASCII: "${response.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}" `);
-        
-        // Try to decode if it looks like timecode
-        if (response.length >= 4) {
-          const decoded = decodeTimecodeResponse(response, tcCmd.name);
-          if (decoded) {
-            console.log(`🕐 Decoded timecode: ${decoded}`);
-          }
-        }
-      } else {
-        console.log(`❌ No response`);
-      }
-      
-      console.log(''); // Empty line for readability
-      
-    } catch (error) {
-      console.log(`❌ Error: ${error.message}\n`);
-    }
-  }
-}
-
-/**
- * Test tape-specific timecode commands to find the real tape timecode
- * @param {string} path - VTR port path
- */
-async function testTapeTimecodeCommands(path) {
-  console.log('🎬 Testing tape-specific timecode commands...\n');
-  
-  const tapeTimecodeCommands = [
-    // Tape-specific timecode commands
-    { name: 'Tape LTC Reader', cmd: Buffer.from([0x71, 0x00, 0x71]), format: 'Tape LTC position' },
-    { name: 'Current Position', cmd: Buffer.from([0x70, 0x20, 0x50]), format: 'Current tape position' },
-    { name: 'Tape Timer', cmd: Buffer.from([0x72, 0x00, 0x72]), format: 'Tape timer position' },
-    { name: 'CTL Counter', cmd: Buffer.from([0x73, 0x20, 0x53]), format: 'Control track counter' },
-    
-    // Alternative LTC commands
-    { name: 'LTC Reader Data', cmd: Buffer.from([0x78, 0x00, 0x78]), format: 'LTC reader direct' },
-    { name: 'VITC Reader Data', cmd: Buffer.from([0x79, 0x00, 0x79]), format: 'VITC reader direct' },
-    
-    // Sony position commands
-    { name: 'Current Time Sense', cmd: Buffer.from([0x74, 0x00, 0x74]), format: 'Time sense request' },
-    { name: 'LTC Time Sense', cmd: Buffer.from([0x78, 0x10, 0x68]), format: 'LTC time sense' },
-    
-    // HDW-specific position commands
-    { name: 'HDW Current TC', cmd: Buffer.from([0x61, 0x0A, 0x6B]), format: 'HDW current timecode' },
-    { name: 'HDW LTC Read', cmd: Buffer.from([0x61, 0x0C, 0x6D]), format: 'HDW LTC read' },
-    
-    // Extended position requests
-    { name: 'Position Data', cmd: Buffer.from([0x61, 0x10, 0x71]), format: 'Position data request' },
-    { name: 'Time Data', cmd: Buffer.from([0x61, 0x12, 0x73]), format: 'Time data request' }
-  ];
-  
-  for (const tcCmd of tapeTimecodeCommands) {
-    try {
-      console.log(`📤 Testing ${tcCmd.name} (${tcCmd.format})...`);
-      console.log(`   Command: ${tcCmd.cmd.toString('hex')}`);
-      
-      const response = await sendCommand(path, tcCmd.cmd, 3000);
-      
-      if (response && response.length > 0) {
-        console.log(`✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
-        console.log(`   Bytes: [${Array.from(response).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ')}]`);
-        
-        // Try to decode different formats
-        const decoded = decodeTapeTimecode(response, tcCmd.name);
-        if (decoded && decoded !== 'N/A') {
-          console.log(`🕐 Decoded: ${decoded}`);
-          
-          // Check if this looks like your actual timecode (10:22:xx:xx)
-          if (decoded.startsWith('10:22') || decoded.includes('10:22')) {
-            console.log(`🎯 *** FOUND REAL TAPE TIMECODE! ***`);
-            console.log(`🎯 This command reads actual tape position!`);
-          }
-        }
-      } else {
-        console.log(`❌ No response`);
-      }
-      
-      console.log(''); // Empty line for readability
-      
-    } catch (error) {
-      console.log(`❌ Error: ${error.message}\n`);
-    }
-  }
-}
-
-/**
- * Enhanced timecode decoder for tape-specific formats
- * @param {Buffer} response - Raw response buffer
- * @param {string} commandName - Name of command that generated response
- * @returns {string|null} Decoded timecode or null if not valid
- */
-function decodeTapeTimecode(response, commandName) {
-  if (!response || response.length < 3) return null;
-  
-  const bytes = Array.from(response);
-  const hex = response.toString('hex');
-  
-  console.log(`🔍 Analyzing ${commandName} response pattern:`);
-  
-  // Check for "no timecode" patterns
-  if (hex === '917700' || hex === '919100' || hex === '000000') {
-    console.log(`   ⚠️  Pattern indicates no timecode available`);
-    return null;
-  }
-  
-  // Try different Sony 9-pin timecode formats
-  
-  // Format 1: Standard BCD timecode (4+ bytes)
-  if (response.length >= 4) {
-    try {
-      const hours = bcdToBin(bytes[0]);
-      const minutes = bcdToBin(bytes[1]);
-      const seconds = bcdToBin(bytes[2]);
-      const frames = bcdToBin(bytes[3]);
-      
-      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
-        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-        console.log(`   ✅ BCD format: ${timecode}`);
-        return timecode;
-      }
-    } catch (e) {
-      // BCD decode failed, try other formats
-    }
-  }
-  
-  // Format 2: Binary timecode
-  if (response.length >= 4) {
-    const hours = bytes[0];
-    const minutes = bytes[1];
-    const seconds = bytes[2];
-    const frames = bytes[3];
-    
-    if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
-      const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-      console.log(`   ✅ Binary format: ${timecode}`);
-      return timecode;
-    }
-  }
-  
-  // Format 3: Packed timecode (Sony specific)
-  if (response.length >= 3) {
-    try {
-      const packed = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
-      const frames = packed & 0x3F;
-      const seconds = (packed >> 6) & 0x3F;
-      const minutes = (packed >> 12) & 0x3F;
-      const hours = (packed >> 18) & 0x1F;
-      
-      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
-        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-        console.log(`   ✅ Packed format: ${timecode}`);
-        return timecode;
-      }
-    } catch (e) {
-      // Packed decode failed
-    }
-  }
-  
-  console.log(`   ❓ Unknown format - Raw: ${hex}`);
-  return null;
-}
-
-/**
  * Convert BCD (Binary Coded Decimal) to binary
  * @param {number} bcd - BCD byte
  * @returns {number} Binary value
@@ -2003,13 +978,117 @@ function bcdToBin(bcd) {
   return ((bcd >> 4) * 10) + (bcd & 0x0F);
 }
 
+/**
+ * Test which timecode source changes during transport to find the real tape timecode
+ * @param {string} path - VTR port path
+ */
+async function testRealTapeTimecode(path) {
+  console.log('🎬 Testing which timecode advances with tape movement...\n');
+  
+  // The working commands we discovered
+  const timecodeCommands = [
+    { name: 'Tape LTC Reader', cmd: Buffer.from([0x71, 0x00, 0x71]) },
+    { name: 'LTC Reader Data', cmd: Buffer.from([0x78, 0x00, 0x78]) },
+    { name: 'VITC Reader Data', cmd: Buffer.from([0x79, 0x00, 0x79]) },
+    { name: 'HDW Current TC', cmd: Buffer.from([0x61, 0x0A, 0x6B]) },
+    { name: 'HDW LTC Read', cmd: Buffer.from([0x61, 0x0C, 0x6D]) },
+    { name: 'Tape Timer', cmd: Buffer.from([0x72, 0x00, 0x72]) },
+    { name: 'CTL Counter', cmd: Buffer.from([0x73, 0x20, 0x53]) },
+    { name: 'Time Data', cmd: Buffer.from([0x61, 0x12, 0x73]) }
+  ];
+  
+  try {
+    // Get baseline readings
+    console.log('📤 Getting baseline timecode readings...');
+    const baseline = {};
+    for (const tcCmd of timecodeCommands) {
+      try {
+        const response = await sendCommand(path, tcCmd.cmd, 1000);
+        const decoded = decodeTapeTimecode(response, tcCmd.name);
+        baseline[tcCmd.name] = decoded;
+        console.log(`📊 ${tcCmd.name}: ${decoded || 'N/A'}`);
+      } catch (e) {
+        baseline[tcCmd.name] = 'ERROR';
+      }
+    }
+    
+    // Start PLAY
+    console.log('\n📤 Starting PLAY and monitoring timecode changes...');
+    await sendVtrCommand(path, Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
+    
+    // Sample 3 times during play
+    const samples = [];
+    for (let i = 0; i < 3; i++) {
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+      
+      console.log(`\n📊 PLAY Sample ${i + 1}:`);
+      const sample = {};
+      for (const tcCmd of timecodeCommands) {
+        try {
+          const response = await sendCommand(path, tcCmd.cmd, 1000);
+          const decoded = decodeTapeTimecode(response, tcCmd.name);
+          sample[tcCmd.name] = decoded;
+          
+          // Check if this value changed from baseline
+          const changed = baseline[tcCmd.name] !== decoded;
+          const marker = changed ? '🔄 CHANGED!' : '⏸️  Static';
+          console.log(`   ${tcCmd.name}: ${decoded || 'N/A'} ${marker}`);
+        } catch (e) {
+          sample[tcCmd.name] = 'ERROR';
+        }
+      }
+      samples.push(sample);
+    }
+    
+    // Stop transport
+    console.log('\n📤 Stopping transport...');
+    await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
+    
+    // Analysis
+    console.log('\n📊 ANALYSIS - Sources that changed during PLAY:');
+    const changingSources = [];
+    
+    for (const tcCmd of timecodeCommands) {
+      const values = [baseline[tcCmd.name], ...samples.map(s => s[tcCmd.name])];
+      const uniqueValues = new Set(values.filter(v => v && v !== 'N/A' && v !== 'ERROR'));
+      
+      if (uniqueValues.size > 1) {
+        console.log(`✅ ${tcCmd.name}: ADVANCING (${Array.from(uniqueValues).join(' → ')})`);
+        changingSources.push({
+          name: tcCmd.name,
+          command: tcCmd.cmd.toString('hex'),
+          values: Array.from(uniqueValues)
+        });
+      } else {
+        console.log(`❌ ${tcCmd.name}: STATIC (${baseline[tcCmd.name]})`);
+      }
+    }
+    
+    if (changingSources.length > 0) {
+      console.log('\n🎯 REAL TAPE TIMECODE SOURCES FOUND:');
+      changingSources.forEach(source => {
+        console.log(`🎯 ${source.name} (${source.command}) - Use this for real tape timecode!`);
+      });
+      
+      return changingSources;
+    } else {
+      console.log('\n⚠️  No timecode sources advanced during PLAY');
+      console.log('   This suggests the tape may not be moving or no timecode is recorded');
+      return [];
+    }
+    
+  } catch (error) {
+    console.log(`❌ Real tape timecode test failed: ${error.message}`);
+    return [];
+  }
+}
+
 // Export functions for use by other modules
 module.exports = {
   checkSingleVtr,
   checkSingleVtrEnhanced,
   scanAllVtrs,
   monitorVtr,
-  testVtrCommands,
   testCommunication,
   testNoTapeCommands,
   testAlternativeCommands,
@@ -2024,32 +1103,16 @@ module.exports = {
   calculateChecksum,
   createSonyCommand,
   verifyChecksum,
-  playVtr,
-  pauseVtr,
-  stopVtr,
-  recordVtr,
-  fastForwardVtr,
-  rewindVtr,
-  ejectTape,
-  jogForward,
-  jogReverse,
-  shuttlePlus1,
-  shuttleMinus1,
   getExtendedStatus,
   getDeviceType,
   controlVtr,
-  batchControlVtrs,
-  sendVtrCommand,
   analyzeResponse,
   diagnoseMenuIssue,
   testModelVariants,
-  VTR_COMMANDS,
-  VTR_COMMANDS_CORRECTED,
   testCommandFormats,
   testSimpleCommands,
   decodeVtrStatusResponse,
   debugStatusResponses,
-  SONY_9PIN_COMMANDS,
   getCommandBuffer,
   // Timecode functions
   testAllTimecodeCommands,
@@ -2060,5 +1123,8 @@ module.exports = {
   getComprehensiveTimecode,
   testTapeTimecodeCommands,
   decodeTapeTimecode,
-  bcdToBin                     // ← Add this helper function too
+  testRealTapeTimecode,
+  bcdToBin,
+  // Re-export transport functions
+  ...require('../src/commands/vtr_cmds_transport')
 };
