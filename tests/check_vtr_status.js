@@ -1086,6 +1086,14 @@ async function controlVtr(path) {
           }
           break;
           
+        case 'tc-comprehensive':
+          await getComprehensiveTimecode(path);
+          break;
+          
+        case 'tc-advancement':
+          await testTimecodeAdvancement(path);
+          break;
+          
         case 'quit':
         case 'exit':
           console.log('👋 Goodbye!');
