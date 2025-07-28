@@ -341,7 +341,7 @@ async function checkSingleVtr(path) {
   
   try {
     // Use your local enhanced version instead of imported one
-    const status = await getVtrStatusLocal(path);
+    const status = await getVtrStatus(path);
     
     if (status.error) {
       console.log(`❌ Error: ${status.error}`);
@@ -1534,53 +1534,6 @@ class VtrStateManager {
 }
 
 const vtrState = new VtrStateManager();
-
-async function getVtrStatus(path) {
-  try {
-    // Use a non-destructive status query instead of transport commands
-    const response = await sendCommand(path, Buffer.from([0x61, 0x20, 0x41]), 3000);
-    
-    if (!response || response.length === 0) {
-      return { error: 'No response from VTR', mode: 'UNKNOWN', timecode: '00:00:00:00', tape: false };
-    }
-    
-    // Check if we have a recent transport command response stored
-    let mode = 'STOP'; // Default
-    const timecode = '00:00:00:00'; // HDW doesn't provide timecode in basic status
-    
-    // Use stored transport state if available and recent (within 30 seconds)
-    const storedState = getStoredTransportState(path);
-    if (storedState && (Date.now() - storedState.timestamp < 30000)) {
-      const lastResponseHex = storedState.lastResponse.toString('hex');
-      mode = interpretVtrResponse(lastResponseHex);
-      console.log(`📊 Using cached transport state: ${mode} (from ${storedState.lastCommand})`);
-    } else {
-      // Parse current status response for basic state
-      const responseHex = response.toString('hex');
-      if (responseHex === 'cfd700') {
-        mode = 'STOP'; // Standard HDW stop response
-      }
-      console.log(`📊 Using current status response: ${mode}`);
-    }
-    
-    return {
-      mode,
-      timecode,
-      tape: response.length > 0, // VTR responds = tape present
-      speed: '1x',
-      raw: response,
-      responseHex: response.toString('hex')
-    };
-    
-  } catch (error) {
-    return { 
-      error: error.message, 
-      mode: 'ERROR', 
-      timecode: '00:00:00:00', 
-      tape: false 
-    };
-  }
-}
 
 // Remove global state usage and use the state manager instead
 function getStoredTransportState(path) {
