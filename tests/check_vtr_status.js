@@ -583,48 +583,6 @@ async function controlVtr(path) {
 }
 
 /**
- * Debug status responses with detailed analysis
- * @param {string} path - VTR port path
- */
-async function debugStatusResponses(path) {
-  console.log(`🔍 Debug status responses for ${path}...\n`);
-  
-  const statusCommands = [
-    { name: 'Basic Status', cmd: Buffer.from([0x61, 0x20, 0x41]) },
-    { name: 'Device Type', cmd: Buffer.from([0x00, 0x11, 0x11]) },
-    { name: 'Timecode', cmd: Buffer.from([0x74, 0x20, 0x54]) },
-    { name: 'LTC Timecode', cmd: Buffer.from([0x78, 0x20, 0x58]) },
-    { name: 'Timer1', cmd: Buffer.from([0x75, 0x20, 0x55]) }
-  ];
-  
-  for (const statusCmd of statusCommands) {
-    try {
-      console.log(`📤 Testing ${statusCmd.name}...`);
-      const response = await sendCommand(path, statusCmd.cmd, 3000);
-      
-      if (response && response.length > 0) {
-        analyzeResponse(response, statusCmd.name);
-        
-        // Try to decode if it looks like timecode
-        if (statusCmd.name.includes('Timecode') || statusCmd.name.includes('Timer')) {
-          const decoded = decodeTimecodeResponse(response, statusCmd.name);
-          if (decoded) {
-            console.log(`   🕐 Decoded: ${decoded}`);
-          }
-        }
-      } else {
-        console.log(`   ❌ No response`);
-      }
-      
-      console.log(''); // Empty line for readability
-      
-    } catch (error) {
-      console.log(`   ❌ Error: ${error.message}\n`);
-    }
-  }
-}
-
-/**
  * Enhanced timecode decoder for tape-specific formats
  * @param {Buffer} response - Raw response buffer
  * @param {string} commandName - Name of command that generated response
@@ -689,6 +647,341 @@ function decodeTapeTimecode(response, commandName) {
   
   console.log(`   ❓ No valid tape timecode found - Raw: ${hex}`);
   return null;
+}
+
+/**
+ * Test checksum commands
+ * @param {string} path - VTR port path
+ */
+async function testChecksumCommands(path) {
+  console.log(`🧪 Testing checksum commands on ${path}...`);
+  
+  const checksumCommands = [
+    { name: 'Device Type', cmd: Buffer.from([0x00, 0x11, 0x11]) },
+    { name: 'Status', cmd: Buffer.from([0x61, 0x20, 0x41]) },
+    { name: 'LTC', cmd: Buffer.from([0x78, 0x20, 0x58]) }
+  ];
+  
+  for (const cmd of checksumCommands) {
+    try {
+      console.log(`📤 Testing ${cmd.name} with checksum validation...`);
+      
+      // Verify command checksum
+      const isValid = verifyChecksum(cmd.cmd);
+      console.log(`   Checksum valid: ${isValid ? '✅' : '❌'}`);
+      
+      const response = await sendCommand(path, cmd.cmd, 3000);
+      console.log(`✅ ${cmd.name}: ${response.toString('hex')}`);
+    } catch (error) {
+      console.log(`❌ ${cmd.name}: ${error.message}`);
+    }
+  }
+}
+
+/**
+ * Run comprehensive diagnostic check
+ * @param {string} path - VTR port path
+ */
+async function diagnosticCheck(path) {
+  console.log(`🏥 Running diagnostic check on ${path}...`);
+  
+  try {
+    // Test communication
+    console.log('\n1. Testing basic communication...');
+    await testCommunication(path);
+    
+    // Test status commands
+    console.log('\n2. Testing status commands...');
+    await checkSingleVtrEnhanced(path);
+    
+    // Test transport commands
+    console.log('\n3. Testing transport commands...');
+    await testVtrCommands(path);
+    
+    // Test timecode
+    console.log('\n4. Testing timecode...');
+    await testAllTimecodeCommands(path);
+    
+    console.log('\n✅ Diagnostic check complete!');
+  } catch (error) {
+    console.log(`❌ Diagnostic check failed: ${error.message}`);
+  }
+}
+
+/**
+ * Show troubleshooting guide
+ */
+function showTroubleshootingGuide() {
+  console.log('🔧 VTR Troubleshooting Guide');
+  console.log('============================');
+  console.log('\n1. Check cable connections');
+  console.log('2. Verify baud rate (38400)');
+  console.log('3. Check VTR is in remote mode');
+  console.log('4. Try different serial ports');
+  console.log('5. Verify VTR model compatibility');
+}
+
+/**
+ * Show VTR menu guide
+ */
+function showVtrMenuGuide() {
+  console.log('📋 VTR Menu Guide');
+  console.log('=================');
+  console.log('\n1. Set VTR to REMOTE mode');
+  console.log('2. Enable 9-pin control');
+  console.log('3. Set baud rate to 38400');
+  console.log('4. Check interface settings');
+}
+
+/**
+ * Diagnose menu issue
+ * @param {string} path - VTR port path
+ */
+async function diagnoseMenuIssue(path) {
+  console.log(`🔍 Diagnosing menu issues on ${path}...`);
+  
+  try {
+    // Try to establish communication
+    const status = await getVtrStatusNonDestructive(path);
+    
+    if (status.error) {
+      console.log('❌ No communication - Check connections and settings');
+      showTroubleshootingGuide();
+    } else {
+      console.log('✅ Communication OK');
+      console.log(`   Mode: ${status.mode}`);
+      console.log(`   Timecode: ${status.timecode}`);
+    }
+  } catch (error) {
+    console.log(`❌ Diagnosis failed: ${error.message}`);
+  }
+}
+
+/**
+ * Test model variants
+ * @param {string} path - VTR port path
+ */
+async function testModelVariants(path) {
+  console.log(`🧪 Testing model variants on ${path}...`);
+  
+  try {
+    const deviceType = await getDeviceType(path);
+    console.log(`📺 Device type: ${deviceType}`);
+    
+    // Test different command variants
+    await testAlternativeCommands(path);
+  } catch (error) {
+    console.log(`❌ Model variant test failed: ${error.message}`);
+  }
+}
+
+/**
+ * Test command formats
+ * @param {string} path - VTR port path
+ */
+async function testCommandFormats(path) {
+  console.log(`🧪 Testing command formats on ${path}...`);
+  
+  try {
+    await testAlternativeCommands(path);
+    await testChecksumCommands(path);
+  } catch (error) {
+    console.log(`❌ Command format test failed: ${error.message}`);
+  }
+}
+
+/**
+ * Test simple commands
+ * @param {string} path - VTR port path
+ */
+async function testSimpleCommands(path) {
+  console.log(`🧪 Testing simple commands on ${path}...`);
+  
+  try {
+    await testNoTapeCommands(path);
+  } catch (error) {
+    console.log(`❌ Simple command test failed: ${error.message}`);
+  }
+}
+
+/**
+ * Test all Sony 9-pin timecode commands
+ * @param {string} path - VTR port path
+ */
+async function testAllTimecodeCommands(path) {
+  console.log('🕐 Testing all Sony 9-pin timecode commands...\n');
+  
+  const timecodeCommands = [
+    { name: 'Current Time Data', cmd: Buffer.from([0x74, 0x20, 0x54]), description: 'Standard TC request' },
+    { name: 'LTC Time Data', cmd: Buffer.from([0x78, 0x20, 0x58]), description: 'LTC timecode' },
+    { name: 'VITC Time Data', cmd: Buffer.from([0x79, 0x20, 0x59]), description: 'VITC timecode' },
+    { name: 'Timer 1', cmd: Buffer.from([0x75, 0x20, 0x55]), description: 'Timer 1 data' },
+    { name: 'Timer 2', cmd: Buffer.from([0x76, 0x20, 0x56]), description: 'Timer 2 data' },
+    { name: 'User Bits', cmd: Buffer.from([0x77, 0x20, 0x57]), description: 'User bits data' }
+  ];
+  
+  for (const tcCmd of timecodeCommands) {
+    try {
+      console.log(`📤 Testing ${tcCmd.name} (${tcCmd.description})...`);
+      console.log(`   Command: ${tcCmd.cmd.toString('hex')}`);
+      
+      const response = await sendCommand(path, tcCmd.cmd, 3000);
+      
+      if (response && response.length > 0) {
+        console.log(`✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        
+        const decoded = decodeTimecodeResponse(response, tcCmd.name);
+        if (decoded && decoded !== 'N/A') {
+          console.log(`🕐 Decoded: ${decoded}`);
+        }
+      } else {
+        console.log(`❌ No response`);
+      }
+      
+      console.log('');
+      
+    } catch (error) {
+      console.log(`❌ Error: ${error.message}\n`);
+    }
+  }
+}
+
+/**
+ * Test timecode advancement during transport
+ * @param {string} path - VTR port path
+ */
+async function testTimecodeAdvancement(path) {
+  console.log('🎬 Testing timecode advancement during transport...\n');
+  
+  try {
+    console.log('📤 Getting baseline timecode...');
+    const ltcBaseline = await sendCommand(path, Buffer.from([0x78, 0x20, 0x58]), 1000);
+    const timer1Baseline = await sendCommand(path, Buffer.from([0x75, 0x20, 0x55]), 1000);
+    
+    const ltcBaselineDecoded = decodeTimecodeResponse(ltcBaseline, 'LTC');
+    const timer1BaselineDecoded = decodeTimecodeResponse(timer1Baseline, 'Timer1');
+    
+    console.log(`📊 Baseline LTC: ${ltcBaselineDecoded || 'N/A'}`);
+    console.log(`📊 Baseline Timer1: ${timer1BaselineDecoded || 'N/A'}`);
+    
+    console.log('\n📤 Testing PLAY advancement...');
+    await sendVtrCommand(path, Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
+    
+    const ltcSamples = [];
+    const timer1Samples = [];
+    
+    for (let i = 0; i < 3; i++) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const ltcSample = await sendCommand(path, Buffer.from([0x78, 0x20, 0x58]), 1000);
+      const timer1Sample = await sendCommand(path, Buffer.from([0x75, 0x20, 0x55]), 1000);
+      
+      const ltcDecoded = decodeTimecodeResponse(ltcSample, 'LTC');
+      const timer1Decoded = decodeTimecodeResponse(timer1Sample, 'Timer1');
+      
+      ltcSamples.push(ltcDecoded);
+      timer1Samples.push(timer1Decoded);
+      
+      console.log(`📊 PLAY Sample ${i + 1}: LTC:${ltcDecoded || 'N/A'} | T1:${timer1Decoded || 'N/A'}`);
+    }
+    
+    const ltcAdvanced = ltcSamples.some(sample => sample !== ltcBaselineDecoded);
+    const timer1Advanced = timer1Samples.some(sample => sample !== timer1BaselineDecoded);
+    
+    console.log('\n📊 Analysis:');
+    console.log(`   LTC Advanced: ${ltcAdvanced ? '✅ YES' : '❌ NO'}`);
+    console.log(`   Timer1 Advanced: ${timer1Advanced ? '✅ YES' : '❌ NO'}`);
+    
+    console.log('\n📤 Stopping...');
+    await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
+    
+  } catch (error) {
+    console.log(`❌ Timecode advancement test failed: ${error.message}`);
+  }
+}
+
+/**
+ * Get comprehensive timecode from all sources
+ * @param {string} path - VTR port path
+ * @returns {Object} Comprehensive timecode data
+ */
+async function getComprehensiveTimecode(path) {
+  console.log('🕐 Getting comprehensive timecode data...\n');
+  
+  const sources = [
+    { name: 'Standard TC', cmd: Buffer.from([0x74, 0x20, 0x54]) },
+    { name: 'LTC', cmd: Buffer.from([0x78, 0x20, 0x58]) },
+    { name: 'VITC', cmd: Buffer.from([0x79, 0x20, 0x59]) },
+    { name: 'Timer1', cmd: Buffer.from([0x75, 0x20, 0x55]) },
+    { name: 'Timer2', cmd: Buffer.from([0x76, 0x20, 0x56]) },
+    { name: 'User Bits', cmd: Buffer.from([0x77, 0x20, 0x57]) }
+  ];
+  
+  const results = {};
+  
+  for (const source of sources) {
+    try {
+      const response = await sendCommand(path, source.cmd, 1000);
+      const decoded = decodeTimecodeResponse(response, source.name);
+      results[source.name] = {
+        raw: response ? response.toString('hex') : null,
+        decoded: decoded,
+        valid: decoded !== null && decoded !== 'N/A'
+      };
+      console.log(`📊 ${source.name}: ${decoded || 'N/A'} (${response ? response.toString('hex') : 'No response'})`);
+    } catch (error) {
+      results[source.name] = {
+        raw: null,
+        decoded: null,
+        valid: false,
+        error: error.message
+      };
+      console.log(`❌ ${source.name}: ERROR - ${error.message}`);
+    }
+  }
+  
+  console.log('\n🕐 Comprehensive timecode complete!\n');
+  return results;
+}
+
+/**
+ * Test tape-specific timecode commands
+ * @param {string} path - VTR port path
+ */
+async function testTapeTimecodeCommands(path) {
+  console.log('🎬 Testing tape-specific timecode commands...\n');
+  
+  const tapeTimecodeCommands = [
+    { name: 'Tape LTC Reader', cmd: Buffer.from([0x71, 0x00, 0x71]), format: 'Tape LTC position' },
+    { name: 'Current Position', cmd: Buffer.from([0x70, 0x20, 0x50]), format: 'Current tape position' },
+    { name: 'Tape Timer', cmd: Buffer.from([0x72, 0x00, 0x72]), format: 'Tape timer position' },
+    { name: 'CTL Counter', cmd: Buffer.from([0x73, 0x20, 0x53]), format: 'Control track counter' }
+  ];
+  
+  for (const tcCmd of tapeTimecodeCommands) {
+    try {
+      console.log(`📤 Testing ${tcCmd.name} (${tcCmd.format})...`);
+      console.log(`   Command: ${tcCmd.cmd.toString('hex')}`);
+      
+      const response = await sendCommand(path, tcCmd.cmd, 3000);
+      
+      if (response && response.length > 0) {
+        console.log(`✅ Response: ${response.toString('hex')} (${response.length} bytes)`);
+        
+        const decoded = decodeTapeTimecode(response, tcCmd.name);
+        if (decoded && decoded !== 'N/A') {
+          console.log(`🕐 Decoded: ${decoded}`);
+        }
+      } else {
+        console.log(`❌ No response`);
+      }
+      
+      console.log('');
+      
+    } catch (error) {
+      console.log(`❌ Error: ${error.message}\n`);
+    }
+  }
 }
 
 // Export functions for use by other modules
