@@ -52,25 +52,6 @@ const {
   VtrStatusError
 } = require('../src/commands/vtr_cmds_status');
 
-// Import timecode functions
-const {
-  getVtrTimecode,
-  testAllTimecodeCommands,
-  testTimecodeAdvancement,
-  getComprehensiveTimecode,
-  testTapeTimecodeCommands,
-  testRealTapeTimecode,
-  testTimecodeMovement,
-  getDetailedTimecode,
-  checkTapeMovement,
-  monitorTimecode,
-  decodeTimecodeResponse,
-  decodeTapeTimecode,
-  bcdToBin,
-  VTR_TIMECODE_COMMANDS,
-  VtrTimecodeError
-} = require('./check_vtr_timecode');
-
 // Helper functions (keep these in test file)
 function calculateChecksum(commandBytes) {
   let checksum = 0;
@@ -142,232 +123,6 @@ async function testVtrCommands(path) {
     } catch (error) {
       console.log(`❌ ${cmd.name} failed: ${error.message}`);
     }
-  }
-}
-
-/**
- * Test timecode during transport to see if it updates (alias for testTimecodeAdvancement)
- * @param {string} path - VTR port path
- */
-async function testTimecodeMovement(path) {
-  return await testTimecodeAdvancement(path);
-}
-
-/**
- * Get detailed timecode from multiple sources
- * @param {string} path - VTR port path  
- * @returns {string} Detailed timecode info
- */
-async function getDetailedTimecode(path) {
-  const commands = [
-    { name: 'Standard', cmd: Buffer.from([0x74, 0x20, 0x54]) },
-    { name: 'LTC', cmd: Buffer.from([0x78, 0x20, 0x58]) },
-    { name: 'Timer1', cmd: Buffer.from([0x75, 0x20, 0x55]) }
-  ];
-  
-  const results = [];
-  
-  for (const cmd of commands) {
-    try {
-      const response = await sendCommand(path, cmd.cmd, 1000);
-      const decoded = decodeTimecodeResponse(response, cmd.name);
-      results.push(`${cmd.name}:${decoded || 'N/A'}`);
-    } catch (e) {
-      results.push(`${cmd.name}:ERROR`);
-    }
-  }
-  
-  return results.join(' | ');
-}
-
-/**
- * Decode timecode response based on Sony 9-pin protocol variations
- * @param {Buffer} response - Raw response buffer
- * @param {string} commandName - Name of command that generated response
- * @returns {string|null} Decoded timecode or null if not valid
- */
-function decodeTimecodeResponse(response, commandName) {
-  if (!response || response.length < 3) return null;
-  
-  const bytes = Array.from(response);
-  const hex = response.toString('hex');
-  
-  console.log(`🔍 Analyzing ${commandName} response pattern:`);
-  
-  // Check for "no timecode" patterns
-  if (hex === '917700' || hex === '919100' || hex === '000000') {
-    console.log(`   ⚠️  Pattern indicates no timecode available`);
-    return null;
-  }
-  
-  // Try different Sony 9-pin timecode formats
-  
-  // Format 1: Standard BCD timecode (4+ bytes)
-  if (response.length >= 4) {
-    try {
-      const hours = bcdToBin(bytes[0]);
-      const minutes = bcdToBin(bytes[1]);
-      const seconds = bcdToBin(bytes[2]);
-      const frames = bcdToBin(bytes[3]);
-      
-      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
-        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-        console.log(`   ✅ BCD format: ${timecode}`);
-        return timecode;
-      }
-    } catch (e) {
-      // BCD decode failed, try other formats
-    }
-  }
-  
-  // Format 2: Binary timecode
-  if (response.length >= 4) {
-    const hours = bytes[0];
-    const minutes = bytes[1];
-    const seconds = bytes[2];
-    const frames = bytes[3];
-    
-    if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
-      const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-      console.log(`   ✅ Binary format: ${timecode}`);
-      return timecode;
-    }
-  }
-  
-  // Format 3: Packed timecode (Sony specific)
-  if (response.length >= 3) {
-    try {
-      const packed = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
-      const frames = packed & 0x3F;
-      const seconds = (packed >> 6) & 0x3F;
-      const minutes = (packed >> 12) & 0x3F;
-      const hours = (packed >> 18) & 0x1F;
-      
-      if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
-        const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-        console.log(`   ✅ Packed format: ${timecode}`);
-        return timecode;
-      }
-    } catch (e) {
-      // Packed decode failed
-    }
-  }
-  
-  console.log(`   ❓ Unknown format - Raw: ${hex}`);
-  return null;
-}
-
-/**
- * Convert BCD (Binary Coded Decimal) to binary
- * @param {number} bcd - BCD byte
- * @returns {number} Binary value
- */
-function bcdToBin(bcd) {
-  return ((bcd >> 4) * 10) + (bcd & 0x0F);
-}
-
-/**
- * Test which timecode source changes during transport to find the real tape timecode
- * @param {string} path - VTR port path
- */
-async function testRealTapeTimecode(path) {
-  console.log('🎬 Testing which timecode advances with tape movement...\n');
-  
-  // The working commands we discovered
-  const timecodeCommands = [
-    { name: 'Tape LTC Reader', cmd: Buffer.from([0x71, 0x00, 0x71]) },
-    { name: 'LTC Reader Data', cmd: Buffer.from([0x78, 0x00, 0x78]) },
-    { name: 'VITC Reader Data', cmd: Buffer.from([0x79, 0x00, 0x79]) },
-    { name: 'HDW Current TC', cmd: Buffer.from([0x61, 0x0A, 0x6B]) },
-    { name: 'HDW LTC Read', cmd: Buffer.from([0x61, 0x0C, 0x6D]) },
-    { name: 'Tape Timer', cmd: Buffer.from([0x72, 0x00, 0x72]) },
-    { name: 'CTL Counter', cmd: Buffer.from([0x73, 0x20, 0x53]) },
-    { name: 'Time Data', cmd: Buffer.from([0x61, 0x12, 0x73]) }
-  ];
-  
-  try {
-    // Get baseline readings
-    console.log('📤 Getting baseline timecode readings...');
-    const baseline = {};
-    for (const tcCmd of timecodeCommands) {
-      try {
-        const response = await sendCommand(path, tcCmd.cmd, 1000);
-        const decoded = decodeTapeTimecode(response, tcCmd.name);
-        baseline[tcCmd.name] = decoded;
-        console.log(`📊 ${tcCmd.name}: ${decoded || 'N/A'}`);
-      } catch (e) {
-        baseline[tcCmd.name] = 'ERROR';
-      }
-    }
-    
-    // Start PLAY
-    console.log('\n📤 Starting PLAY and monitoring timecode changes...');
-    await sendVtrCommand(path, Buffer.from([0x20, 0x01, 0x21]), 'PLAY');
-    
-    // Sample 3 times during play
-    const samples = [];
-    for (let i = 0; i < 3; i++) {
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
-      
-      console.log(`\n📊 PLAY Sample ${i + 1}:`);
-      const sample = {};
-      for (const tcCmd of timecodeCommands) {
-        try {
-          const response = await sendCommand(path, tcCmd.cmd, 1000);
-          const decoded = decodeTapeTimecode(response, tcCmd.name);
-          sample[tcCmd.name] = decoded;
-          
-          // Check if this value changed from baseline
-          const changed = baseline[tcCmd.name] !== decoded;
-          const marker = changed ? '🔄 CHANGED!' : '⏸️  Static';
-          console.log(`   ${tcCmd.name}: ${decoded || 'N/A'} ${marker}`);
-        } catch (e) {
-          sample[tcCmd.name] = 'ERROR';
-        }
-      }
-      samples.push(sample);
-    }
-    
-    // Stop transport
-    console.log('\n📤 Stopping transport...');
-    await sendVtrCommand(path, Buffer.from([0x20, 0x00, 0x20]), 'STOP');
-    
-    // Analysis
-    console.log('\n📊 ANALYSIS - Sources that changed during PLAY:');
-    const changingSources = [];
-    
-    for (const tcCmd of timecodeCommands) {
-      const values = [baseline[tcCmd.name], ...samples.map(s => s[tcCmd.name])];
-      const uniqueValues = new Set(values.filter(v => v && v !== 'N/A' && v !== 'ERROR'));
-      
-      if (uniqueValues.size > 1) {
-        console.log(`✅ ${tcCmd.name}: ADVANCING (${Array.from(uniqueValues).join(' → ')})`);
-        changingSources.push({
-          name: tcCmd.name,
-          command: tcCmd.cmd.toString('hex'),
-          values: Array.from(uniqueValues)
-        });
-      } else {
-        console.log(`❌ ${tcCmd.name}: STATIC (${baseline[tcCmd.name]})`);
-      }
-    }
-    
-    if (changingSources.length > 0) {
-      console.log('\n🎯 REAL TAPE TIMECODE SOURCES FOUND:');
-      changingSources.forEach(source => {
-        console.log(`🎯 ${source.name} (${source.command}) - Use this for real tape timecode!`);
-      });
-      
-      return changingSources;
-    } else {
-      console.log('\n⚠️  No timecode sources advanced during PLAY');
-      console.log('   This suggests the tape may not be moving or no timecode is recorded');
-      return [];
-    }
-    
-  } catch (error) {
-    console.log(`❌ Real tape timecode test failed: ${error.message}`);
-    return [];
   }
 }
 
@@ -482,33 +237,19 @@ async function controlVtr(path) {
   });
 }
 
-// Update module exports to remove timecode functions since they're now imported
+// Update module exports to only include test-specific functions
 module.exports = {
-  // Test-specific functions (keep these)
+  // Test-specific functions only
   scanAllVtrs,
   testVtrCommands,
-  testChecksumCommands,
-  diagnosticCheck,
-  showTroubleshootingGuide,
-  showVtrMenuGuide,
-  sendRawCommand,
   calculateChecksum,
   createSonyCommand,
   verifyChecksum,
+  sendVtrCommand,
   controlVtr,
-  diagnoseMenuIssue,
-  testModelVariants,
-  testCommandFormats,
-  testSimpleCommands,
   
-  // Re-export transport functions
-  ...require('../src/commands/vtr_cmds_transport'),
-  
-  // Re-export status functions
-  ...require('../src/commands/vtr_cmds_status'),
-  
-  // Re-export timecode functions
-  ...require('./check_vtr_timecode')
+  // Don't re-export everything - causes conflicts
+  // Just export what this module specifically provides
 };
 
 // ===== MAIN EXECUTION BLOCK =====
