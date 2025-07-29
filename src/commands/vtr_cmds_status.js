@@ -226,12 +226,29 @@ async function getVtrStatusNonDestructive(path) {
     
     const status = decodeVtrStatusResponse(response);
     
-    // Try to get timecode as well
+    // Use working LTC timecode function
     try {
-      const { getVtrTimecode } = require('./vtr_cmds_timecode');
-      status.timecode = await getVtrTimecode(path);
+      const ltcResponse = await sendCommand(path, Buffer.from([0x78, 0x20, 0x58]), 1000);
+      if (ltcResponse && ltcResponse.length >= 3) {
+        // Decode using packed format (your working method)
+        const bytes = Array.from(ltcResponse);
+        const packed = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
+        const frames = packed & 0x3F;
+        const seconds = (packed >> 6) & 0x3F;
+        const minutes = (packed >> 12) & 0x3F;
+        const hours = (packed >> 18) & 0x1F;
+        
+        if (hours <= 23 && minutes <= 59 && seconds <= 59 && frames <= 29) {
+          const timecode = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+          status.timecode = timecode;
+        } else {
+          status.timecode = 'TC:NO_DECODE';
+        }
+      } else {
+        status.timecode = 'TC:NO_RESPONSE';
+      }
     } catch (e) {
-      status.timecode = 'TC:UNAVAILABLE';
+      status.timecode = 'TC:ERROR';
     }
     
     return status;
