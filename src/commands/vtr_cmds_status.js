@@ -597,6 +597,156 @@ async function monitorVtr(path, intervalMs = 1000) {
   });
 }
 
+/**
+ * Detect exact VTR model and capabilities
+ * @param {string} path - VTR port path
+ * @returns {Promise<Object>} VTR model information
+ */
+async function detectVtrModel(path) {
+  console.log(`🔍 Detecting VTR model at ${path}...`);
+  
+  const modelInfo = {
+    manufacturer: 'Sony',
+    series: 'Unknown',
+    model: 'Unknown',
+    capabilities: [],
+    deviceId: null,
+    version: null,
+    supportedCommands: []
+  };
+  
+  try {
+    // Get device type response
+    console.log('📤 Requesting device type...');
+    const deviceResponse = await sendCommand(path, VTR_STATUS_COMMANDS.DEVICE_TYPE, 3000);
+    
+    if (deviceResponse && deviceResponse.length >= 3) {
+      const deviceId = deviceResponse[0];
+      const subType = deviceResponse[1];
+      const version = deviceResponse[2];
+      
+      modelInfo.deviceId = deviceId;
+      modelInfo.version = version;
+      
+      console.log(`📺 Device ID: 0x${deviceId.toString(16).padStart(2, '0')} (${deviceId})`);
+      console.log(`📺 Sub-type: 0x${subType.toString(16).padStart(2, '0')} (${subType})`);
+      console.log(`📺 Version: 0x${version.toString(16).padStart(2, '0')} (${version})`);
+      
+      // Enhanced model detection based on your VTR's response pattern
+      if (deviceId === 0xBA) {
+        modelInfo.series = 'HDW Series';
+        
+        // Determine specific HDW model based on sub-type and version
+        if (subType === 0xBA && version === 0xBA) {
+          modelInfo.model = 'HDW-500/700 Series';
+          modelInfo.capabilities = [
+            'Sony 9-pin RS-422 Control',
+            'Digital Betacam Recording',
+            'Component Video I/O',
+            'Timecode Support',
+            'Remote Control',
+            'Variable Speed Playback'
+          ];
+        } else if (subType >= 0x30 && subType <= 0x3F) {
+          modelInfo.model = 'HDW-M2000/M2100 Series';
+          modelInfo.capabilities = [
+            'Sony 9-pin RS-422 Control',
+            'Digital Betacam Recording',
+            'Multi-format Support',
+            'Advanced Servo Control',
+            'Timecode Support'
+          ];
+        } else {
+          modelInfo.model = 'HDW Series (Unknown variant)';
+          modelInfo.capabilities = [
+            'Sony 9-pin RS-422 Control',
+            'Digital Betacam Recording',
+            'Basic Transport Control'
+          ];
+        }
+      } else {
+        // Handle other device types
+        const deviceName = DEVICE_TYPES[deviceId] || `Unknown (0x${deviceId.toString(16)})`;
+        modelInfo.series = deviceName;
+        modelInfo.model = deviceName;
+      }
+    }
+    
+    // Test supported commands
+    console.log('📤 Testing command support...');
+    const supportedCommands = await testCommandSupport(path);
+    modelInfo.supportedCommands = supportedCommands;
+    
+    // Get extended status for more details
+    try {
+      console.log('📤 Getting extended status...');
+      const extResponse = await sendCommand(path, VTR_STATUS_COMMANDS.EXTENDED_STATUS, 3000);
+      if (extResponse && extResponse.length > 0) {
+        console.log(`📊 Extended status available: ${extResponse.toString('hex')}`);
+        modelInfo.capabilities.push('Extended Status Support');
+      }
+    } catch (e) {
+      console.log('⚠️  Extended status not supported');
+    }
+    
+    // Display detected model info
+    console.log('\n🎯 VTR MODEL DETECTED:');
+    console.log(`📺 Manufacturer: ${modelInfo.manufacturer}`);
+    console.log(`📺 Series: ${modelInfo.series}`);
+    console.log(`📺 Model: ${modelInfo.model}`);
+    console.log(`📺 Device ID: 0x${modelInfo.deviceId?.toString(16).padStart(2, '0') || 'Unknown'}`);
+    console.log(`📺 Version: 0x${modelInfo.version?.toString(16).padStart(2, '0') || 'Unknown'}`);
+    
+    if (modelInfo.capabilities.length > 0) {
+      console.log(`🔧 Capabilities:`);
+      modelInfo.capabilities.forEach(cap => {
+        console.log(`   • ${cap}`);
+      });
+    }
+    
+    if (modelInfo.supportedCommands.length > 0) {
+      console.log(`📋 Supported Commands: ${modelInfo.supportedCommands.join(', ')}`);
+    }
+    
+    return modelInfo;
+    
+  } catch (error) {
+    console.log(`❌ Model detection failed: ${error.message}`);
+    return modelInfo;
+  }
+}
+
+/**
+ * Test which commands are supported by the VTR
+ * @param {string} path - VTR port path
+ * @returns {Promise<Array>} Array of supported command names
+ */
+async function testCommandSupport(path) {
+  const commandTests = [
+    { name: 'Basic Status', cmd: VTR_STATUS_COMMANDS.STATUS },
+    { name: 'Device Type', cmd: VTR_STATUS_COMMANDS.DEVICE_TYPE },
+    { name: 'Extended Status', cmd: VTR_STATUS_COMMANDS.EXTENDED_STATUS },
+    { name: 'Local Disable', cmd: VTR_STATUS_COMMANDS.LOCAL_DISABLE },
+    { name: 'Position Data', cmd: VTR_STATUS_COMMANDS.HDW_POSITION },
+    { name: 'Search Data', cmd: VTR_STATUS_COMMANDS.SEARCH_DATA }
+  ];
+  
+  const supported = [];
+  
+  for (const test of commandTests) {
+    try {
+      const response = await sendCommand(path, test.cmd, 1000);
+      if (response && response.length > 0) {
+        supported.push(test.name);
+      }
+    } catch (e) {
+      // Command not supported or failed
+    }
+  }
+  
+  return supported;
+}
+
 module.exports = {
   // Status command functions
   getDeviceType,
@@ -625,5 +775,9 @@ module.exports = {
   VTR_STATUS_PATTERNS,
   
   // Error class
-  VtrStatusError
+  VtrStatusError,
+  
+  // Model detection functions
+  detectVtrModel,
+  testCommandSupport
 };

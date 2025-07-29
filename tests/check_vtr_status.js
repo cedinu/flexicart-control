@@ -52,6 +52,17 @@ const {
   VtrStatusError
 } = require('../src/commands/vtr_cmds_status');
 
+// Import timecode functions that are missing
+const {
+  testAllTimecodeCommands,
+  testTimecodeAdvancement,
+  getDetailedTimecode,
+  testTapeTimecodeCommands,
+  testRealTapeTimecode,
+  monitorTimecode,
+  checkTapeMovement
+} = require('./check_vtr_timecode');
+
 // Helper functions (keep these in test file)
 function calculateChecksum(commandBytes) {
   let checksum = 0;
@@ -79,6 +90,72 @@ function verifyChecksum(command) {
 // Update sendVtrCommand to use the transport module
 async function sendVtrCommand(path, command, commandName) {
   return await sendVtrTransportCommand(path, command, commandName);
+}
+
+/**
+ * Send raw command to VTR with proper error handling
+ * @param {string} path - VTR port path
+ * @param {string} hexCommand - Hex command string
+ */
+async function sendRawCommand(path, hexCommand) {
+  console.log('🎬 VTR Status Checker & Controller');
+  console.log('==================================');
+  console.log(`🔧 Sending raw command: ${hexCommand}`);
+  
+  try {
+    // Parse hex string to buffer
+    const bytes = hexCommand.split(' ').map(hex => parseInt(hex, 16));
+    const command = Buffer.from(bytes);
+    
+    console.log(`📤 Command bytes: ${command.toString('hex')}`);
+    console.log(`📤 Command length: ${command.length} bytes`);
+    console.log(`📤 Individual bytes: [${bytes.map(b => `0x${b.toString(16)}`).join(', ')}]`);
+    
+    const response = await sendCommand(path, command, 3000);
+    
+    if (response && response.length > 0) {
+      const hex = response.toString('hex');
+      const bytes = Array.from(response);
+      const ascii = response.toString('ascii').replace(/[^\x20-\x7E]/g, '.');
+      const binary = bytes.map(b => b.toString(2).padStart(8, '0')).join(' ');
+      
+      console.log(`📥 Response: ${hex} (${response.length} bytes)`);
+      console.log(`📥 Individual bytes: [${bytes.map(b => `0x${b.toString(16)}`).join(', ')}]`);
+      console.log(`📥 ASCII: "${ascii}"`);
+      console.log(`📥 Binary: ${binary}`);
+      
+      analyzeResponse(response, 'Raw Command');
+      
+    } else {
+      console.log('❌ No response received');
+    }
+    
+  } catch (error) {
+    console.log(`❌ Raw command failed: ${error.message}`);
+  }
+}
+
+/**
+ * Diagnostic check function
+ * @param {string} path - VTR port path
+ */
+async function diagnosticCheck(path) {
+  console.log(`🔍 Running diagnostic check on ${path}...`);
+  
+  try {
+    // Test basic communication
+    await testCommunication(path);
+    
+    // Check status
+    await checkSingleVtrEnhanced(path);
+    
+    // Test transport commands
+    await testVtrCommands(path);
+    
+    console.log('✅ Diagnostic check complete');
+  } catch (error) {
+    console.log(`❌ Diagnostic check failed: ${error.message}`);
+  }
 }
 
 /**
@@ -259,6 +336,10 @@ module.exports = {
 async function main() {
   const args = process.argv.slice(2);
   
+  // Show header for all commands
+  console.log('🎬 VTR Status Checker & Controller');
+  console.log('==================================');
+  
   // Show help if no arguments
   if (args.length === 0) {
     console.log('🎛️ VTR Control System');
@@ -268,12 +349,13 @@ async function main() {
     console.log('  node check_vtr_status.js --control <port>          # Interactive control');
     console.log('  node check_vtr_status.js --test <port>             # Test commands');
     console.log('  node check_vtr_status.js --status <port>           # Check status');
+    console.log('  node check_vtr_status.js --model <port>            # Detect VTR model');
     console.log('  node check_vtr_status.js --timecode <port>         # Test timecode');
     console.log('  node check_vtr_status.js --raw <port> <hex_cmd>    # Send raw command');
     console.log('\nExamples:');
     console.log('  node check_vtr_status.js --scan');
     console.log('  node check_vtr_status.js --control /dev/ttyRP11');
-    console.log('  node check_vtr_status.js --test /dev/ttyRP11');
+    console.log('  node check_vtr_status.js --model /dev/ttyRP11');
     console.log('  node check_vtr_status.js --raw /dev/ttyRP11 "20 01 21"');
     console.log('\n📋 Available VTR ports:');
     VTR_PORTS.forEach(port => {
@@ -292,14 +374,28 @@ async function main() {
         await scanAllVtrs();
         break;
         
-      case '--control':
+      case '--model':
         if (!vtrPath) {
-          console.log('❌ Error: Port path required for control mode');
-          console.log('Usage: node check_vtr_status.js --control <port>');
+          console.log('❌ Error: Port path required for model detection');
+          console.log('Usage: node check_vtr_status.js --model <port>');
           return;
         }
-        console.log(`🎛️ Starting interactive control for ${vtrPath}...`);
-        await controlVtr(vtrPath);
+        console.log(`🔍 Detecting VTR model at ${vtrPath}...`);
+        await detectVtrModel(vtrPath);
+        break;
+        
+      case '--status':
+        if (!vtrPath) {
+          console.log('❌ Error: Port path required for status check');
+          console.log('Usage: node check_vtr_status.js --status <port>');
+          return;
+        }
+        console.log(`📊 Checking status of VTR at ${vtrPath}...`);
+        
+        // Show model info first when checking status
+        const modelInfo = await detectVtrModel(vtrPath);
+        console.log(''); // Separator
+        await checkSingleVtrEnhanced(vtrPath);
         break;
         
       case '--test':
@@ -312,14 +408,14 @@ async function main() {
         await diagnosticCheck(vtrPath);
         break;
         
-      case '--status':
+      case '--control':
         if (!vtrPath) {
-          console.log('❌ Error: Port path required for status check');
-          console.log('Usage: node check_vtr_status.js --status <port>');
+          console.log('❌ Error: Port path required for control mode');
+          console.log('Usage: node check_vtr_status.js --control <port>');
           return;
         }
-        console.log(`📊 Checking status of VTR at ${vtrPath}...`);
-        await checkSingleVtrEnhanced(vtrPath);
+        console.log(`🎛️ Starting interactive control for ${vtrPath}...`);
+        await controlVtr(vtrPath);
         break;
         
       case '--timecode':
@@ -386,9 +482,10 @@ async function main() {
         console.log('===========================');
         console.log('\nAvailable Commands:');
         console.log('  --scan                 Scan for VTRs on all ports');
+        console.log('  --model <port>         Detect exact VTR model and capabilities');
         console.log('  --control <port>       Interactive VTR control');
         console.log('  --test <port>          Run diagnostic tests');
-        console.log('  --status <port>        Check VTR status');
+        console.log('  --status <port>        Check VTR status (includes model detection)');
         console.log('  --timecode <port>      Test timecode commands');
         console.log('  --debug <port>         Debug status responses');
         console.log('  --tape-tc <port>       Test tape timecode sources');
