@@ -46,6 +46,8 @@ const {
   decodeVtrStatusResponse,
   interpretVtrStatusResponse,
   getCommandBuffer,
+  detectVtrModel,        // ✅ Add this
+  testCommandSupport,    // ✅ Add this
   VTR_STATUS_COMMANDS,
   DEVICE_TYPES,
   VTR_STATUS_PATTERNS,
@@ -98,9 +100,7 @@ async function sendVtrCommand(path, command, commandName) {
  * @param {string} hexCommand - Hex command string
  */
 async function sendRawCommand(path, hexCommand) {
-  console.log('🎬 VTR Status Checker & Controller');
-  console.log('==================================');
-  console.log(`🔧 Sending raw command: ${hexCommand}`);
+  console.log(`🔧 Sending raw command: ${hexCommand} to ${path}`);
   
   try {
     // Parse hex string to buffer
@@ -109,23 +109,13 @@ async function sendRawCommand(path, hexCommand) {
     
     console.log(`📤 Command bytes: ${command.toString('hex')}`);
     console.log(`📤 Command length: ${command.length} bytes`);
-    console.log(`📤 Individual bytes: [${bytes.map(b => `0x${b.toString(16)}`).join(', ')}]`);
     
     const response = await sendCommand(path, command, 3000);
     
     if (response && response.length > 0) {
       const hex = response.toString('hex');
-      const bytes = Array.from(response);
-      const ascii = response.toString('ascii').replace(/[^\x20-\x7E]/g, '.');
-      const binary = bytes.map(b => b.toString(2).padStart(8, '0')).join(' ');
-      
       console.log(`📥 Response: ${hex} (${response.length} bytes)`);
-      console.log(`📥 Individual bytes: [${bytes.map(b => `0x${b.toString(16)}`).join(', ')}]`);
-      console.log(`📥 ASCII: "${ascii}"`);
-      console.log(`📥 Binary: ${binary}`);
-      
       analyzeResponse(response, 'Raw Command');
-      
     } else {
       console.log('❌ No response received');
     }
@@ -148,9 +138,6 @@ async function diagnosticCheck(path) {
     
     // Check status
     await checkSingleVtrEnhanced(path);
-    
-    // Test transport commands
-    await testVtrCommands(path);
     
     console.log('✅ Diagnostic check complete');
   } catch (error) {

@@ -632,43 +632,108 @@ async function detectVtrModel(path) {
       console.log(`📺 Sub-type: 0x${subType.toString(16).padStart(2, '0')} (${subType})`);
       console.log(`📺 Version: 0x${version.toString(16).padStart(2, '0')} (${version})`);
       
-      // Enhanced model detection based on your VTR's response pattern
-      if (deviceId === 0xBA) {
+      // Enhanced model detection based on device responses
+      if (deviceId === 0x20) {
+        modelInfo.series = 'BVW Series';
+        modelInfo.model = 'BVW-75/65 Betacam SP';
+        modelInfo.capabilities = [
+          'Sony 9-pin RS-422 Control',
+          'Betacam SP Recording',
+          'Component Video I/O',
+          'Timecode Support',
+          'Remote Control'
+        ];
+      } else if (deviceId === 0x21) {
+        modelInfo.series = 'BVW Series';
+        modelInfo.model = 'BVW-40/35 Betacam SP';
+        modelInfo.capabilities = [
+          'Sony 9-pin RS-422 Control',
+          'Betacam SP Recording',
+          'Basic Transport Control'
+        ];
+      } else if (deviceId === 0x22) {
+        modelInfo.series = 'UVW Series';
+        modelInfo.model = 'UVW-1800/1400 Betacam SP';
+        modelInfo.capabilities = [
+          'Sony 9-pin RS-422 Control',
+          'Betacam SP Recording',
+          'Digital I/O',
+          'Timecode Support'
+        ];
+      } else if (deviceId >= 0x40 && deviceId <= 0x4F) {
+        modelInfo.series = 'DVW Series';
+        modelInfo.model = 'DVW-500/700 Digital Betacam';
+        modelInfo.capabilities = [
+          'Sony 9-pin RS-422 Control',
+          'Digital Betacam Recording',
+          'Component Video I/O',
+          'Digital Audio',
+          'Advanced Timecode Support'
+        ];
+      } else if (deviceId >= 0x50 && deviceId <= 0x5F) {
         modelInfo.series = 'HDW Series';
-        
-        // Determine specific HDW model based on sub-type and version
+        modelInfo.model = 'HDW-500/700/2000 HDCAM';
+        modelInfo.capabilities = [
+          'Sony 9-pin RS-422 Control',
+          'HDCAM Recording',
+          'HD Component Video I/O',
+          'Digital Audio',
+          'Advanced Servo Control',
+          'Variable Speed Playback'
+        ];
+      } else if (deviceId >= 0x60 && deviceId <= 0x6F) {
+        modelInfo.series = 'PDW Series';
+        modelInfo.model = 'PDW-1500/510P XDCAM';
+        modelInfo.capabilities = [
+          'Sony 9-pin RS-422 Control',
+          'XDCAM Recording',
+          'Professional Disc',
+          'Multiple Format Support'
+        ];
+      } else if (deviceId >= 0xBA && deviceId <= 0xBF) {
+        modelInfo.series = 'HDW Series';
         if (subType === 0xBA && version === 0xBA) {
-          modelInfo.model = 'HDW-500/700 Series';
-          modelInfo.capabilities = [
-            'Sony 9-pin RS-422 Control',
-            'Digital Betacam Recording',
-            'Component Video I/O',
-            'Timecode Support',
-            'Remote Control',
-            'Variable Speed Playback'
-          ];
-        } else if (subType >= 0x30 && subType <= 0x3F) {
           modelInfo.model = 'HDW-M2000/M2100 Series';
           modelInfo.capabilities = [
             'Sony 9-pin RS-422 Control',
             'Digital Betacam Recording',
             'Multi-format Support',
             'Advanced Servo Control',
-            'Timecode Support'
+            'Comprehensive Timecode Support',
+            'Variable Speed Playback',
+            'Digital I/O'
           ];
         } else {
-          modelInfo.model = 'HDW Series (Unknown variant)';
+          modelInfo.model = 'HDW Series Professional';
           modelInfo.capabilities = [
             'Sony 9-pin RS-422 Control',
-            'Digital Betacam Recording',
-            'Basic Transport Control'
+            'Professional Recording',
+            'Advanced Transport Control'
           ];
         }
       } else {
-        // Handle other device types
-        const deviceName = DEVICE_TYPES[deviceId] || `Unknown (0x${deviceId.toString(16)})`;
+        // Handle unknown device types
+        const deviceName = DEVICE_TYPES[deviceId] || `Unknown Device (0x${deviceId.toString(16)})`;
         modelInfo.series = deviceName;
         modelInfo.model = deviceName;
+        modelInfo.capabilities = [
+          'Sony 9-pin RS-422 Control',
+          'Basic Transport Control'
+        ];
+      }
+    } else {
+      console.log('⚠️  No device type response - testing basic commands...');
+      
+      // Try basic status to confirm it's a VTR
+      const statusResponse = await sendCommand(path, VTR_STATUS_COMMANDS.STATUS, 3000);
+      if (statusResponse && statusResponse.length > 0) {
+        modelInfo.model = 'Sony VTR (Model Unknown)';
+        modelInfo.capabilities = [
+          'Sony 9-pin RS-422 Control',
+          'Basic Status Support'
+        ];
+      } else {
+        throw new Error('No valid VTR response received');
       }
     }
     
@@ -712,6 +777,8 @@ async function detectVtrModel(path) {
     
   } catch (error) {
     console.log(`❌ Model detection failed: ${error.message}`);
+    modelInfo.model = 'Detection Failed';
+    modelInfo.capabilities = ['Error: ' + error.message];
     return modelInfo;
   }
 }
@@ -726,9 +793,7 @@ async function testCommandSupport(path) {
     { name: 'Basic Status', cmd: VTR_STATUS_COMMANDS.STATUS },
     { name: 'Device Type', cmd: VTR_STATUS_COMMANDS.DEVICE_TYPE },
     { name: 'Extended Status', cmd: VTR_STATUS_COMMANDS.EXTENDED_STATUS },
-    { name: 'Local Disable', cmd: VTR_STATUS_COMMANDS.LOCAL_DISABLE },
-    { name: 'Position Data', cmd: VTR_STATUS_COMMANDS.HDW_POSITION },
-    { name: 'Search Data', cmd: VTR_STATUS_COMMANDS.SEARCH_DATA }
+    { name: 'Local Disable', cmd: VTR_STATUS_COMMANDS.LOCAL_DISABLE }
   ];
   
   const supported = [];
