@@ -157,13 +157,69 @@ async function testFlexicartMovementLocal(path) {
 }
 
 /**
- * Test RS-422 serial settings
+ * Check and clear port locks before testing
+ * @param {string} portPath - Port path to check
+ */
+async function checkAndClearPortLocks(portPath) {
+    console.log(`🔍 Checking for port locks on ${portPath}...`);
+    
+    try {
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execAsync = util.promisify(exec);
+        
+        // Check if port is being used
+        try {
+            const { stdout } = await execAsync(`sudo fuser ${portPath} 2>/dev/null`);
+            if (stdout.trim()) {
+                console.log(`⚠️  Port ${portPath} is in use by process(es): ${stdout.trim()}`);
+                console.log(`🔧 Attempting to kill blocking processes...`);
+                
+                await execAsync(`sudo fuser -k ${portPath}`);
+                console.log(`✅ Killed processes blocking ${portPath}`);
+                
+                // Wait for processes to fully terminate
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            } else {
+                console.log(`✅ No processes blocking ${portPath}`);
+            }
+        } catch (error) {
+            // No processes found - this is good
+            console.log(`✅ No processes found using ${portPath}`);
+        }
+        
+        // Check permissions
+        try {
+            const fs = require('fs');
+            const stats = fs.statSync(portPath);
+            const mode = (stats.mode & parseInt('777', 8)).toString(8);
+            console.log(`📋 Port permissions: ${mode}`);
+            
+            if (mode !== '666' && mode !== '660') {
+                console.log(`🔧 Setting port permissions...`);
+                await execAsync(`sudo chmod 666 ${portPath}`);
+                console.log(`✅ Port permissions updated`);
+            }
+        } catch (permError) {
+            console.log(`⚠️  Could not check/set permissions: ${permError.message}`);
+        }
+        
+    } catch (error) {
+        console.log(`⚠️  Port lock check failed: ${error.message}`);
+    }
+}
+
+/**
+ * Test RS-422 serial settings with port cleanup
  * @param {string} flexicartPath - Flexicart port path
  */
 async function testSerialSettings(flexicartPath) {
     console.log(`\n🔧 Testing RS-422 configurations for ${flexicartPath}...`);
     
     try {
+        // First check and clear any port locks
+        await checkAndClearPortLocks(flexicartPath);
+        
         const result = await testSerialConfigurations(flexicartPath, true);
         
         if (result) {
@@ -171,11 +227,12 @@ async function testSerialSettings(flexicartPath) {
             console.log('💡 Update your configuration to use these settings');
         } else {
             console.log('\n❌ No working configuration found');
-            console.log('💡 Possible issues:');
-            console.log('   - Device not powered on');
-            console.log('   - Wrong serial port');
-            console.log('   - Cable connection problems');
-            console.log('   - Different protocol altogether');
+            console.log('💡 Additional troubleshooting:');
+            console.log('   - Verify Flexicart is powered on and ready');
+            console.log('   - Check RS-422 cable connections (differential signaling)');
+            console.log('   - Confirm this is the correct serial port');
+            console.log('   - Try a different port: /dev/ttyRP1, /dev/ttyRP2, etc.');
+            console.log('   - Check if device uses different protocol (RS-232, Ethernet, etc.)');
         }
         
         return result;
