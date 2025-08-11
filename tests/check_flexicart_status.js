@@ -73,27 +73,49 @@ async function checkSingleFlexicart(path) {
 
 /**
  * Scan all Flexicart ports for devices
+ * @param {boolean} debug - Enable detailed debugging output
  * @returns {Promise<Array>} Array of found Flexicarts
  */
-async function scanAllFlexicarts() {
-    console.log('🔍 Scanning for Flexicarts on all ports...');
+async function scanAllFlexicarts(debug = false) {
+    if (debug) {
+        console.log('🔍 Scanning for Flexicarts on all ports (DEBUG MODE)...');
+    } else {
+        console.log('🔍 Scanning for Flexicarts on all ports...');
+    }
     
     try {
-        // Use the imported auto-scan function
-        const results = await autoScanFlexicarts(FLEXICART_PORTS);
+        // Use the imported auto-scan function with debug mode
+        const results = await autoScanFlexicarts(FLEXICART_PORTS, debug);
         
         if (results.length === 0) {
             console.log('❌ No Flexicarts found');
+            
+            if (debug) {
+                console.log('\n💡 [DEBUG] Troubleshooting suggestions:');
+                console.log('   1. Check if Flexicart devices are powered on');
+                console.log('   2. Verify serial cable connections');
+                console.log('   3. Check port permissions (try with sudo)');
+                console.log('   4. Verify baud rate and serial settings');
+                console.log('   5. Test with different port ranges');
+                console.log('\n🔧 [DEBUG] Manual test command:');
+                console.log('   node tests/check_flexicart_status.js --status /dev/ttyRP0 --debug');
+            }
         } else {
             console.log(`\n✅ Found ${results.length} Flexicart(s):`);
             results.forEach(fc => {
                 console.log(`   📦 ${fc.port} - Status: ${fc.status.statusText}`);
+                if (debug) {
+                    console.log(`      Duration: ${fc.scanDuration}ms, Response: ${fc.status.raw}`);
+                }
             });
         }
         
         return results;
     } catch (error) {
         console.log(`❌ Scan failed: ${error.message}`);
+        if (debug) {
+            console.log(`🔍 [DEBUG] Stack trace: ${error.stack}`);
+        }
         return [];
     }
 }
@@ -277,12 +299,23 @@ async function main() {
     console.log('🎬 Flexicart Status Checker & Controller');
     console.log('=======================================');
     
-    if (args.length === 0) {
+    // Check for debug flag
+    const debugMode = args.includes('--debug') || args.includes('-d');
+    const filteredArgs = args.filter(arg => arg !== '--debug' && arg !== '-d');
+    
+    if (debugMode) {
+        console.log('🔍 DEBUG MODE ENABLED');
+        console.log('====================');
+    }
+    
+    if (filteredArgs.length === 0) {
         console.log('\nUsage:');
-        console.log('  node check_flexicart_status.js --scan              # Scan for Flexicarts');
+        console.log('  node check_flexicart_status.js --scan [--debug]    # Scan for Flexicarts');
         console.log('  node check_flexicart_status.js --status <port>     # Check status');
         console.log('  node check_flexicart_status.js --control <port>    # Interactive control');
         console.log('  node check_flexicart_status.js --test <port>       # Test movement');
+        console.log('\nFlags:');
+        console.log('  --debug, -d                                        # Enable detailed debugging');
         console.log('\n📋 Available Flexicart ports:');
         FLEXICART_PORTS.forEach(port => {
             console.log(`  📦 ${port}`);
@@ -290,13 +323,13 @@ async function main() {
         return;
     }
     
-    const command = args[0];
-    const flexicartPath = args[1];
+    const command = filteredArgs[0];
+    const flexicartPath = filteredArgs[1];
     
     try {
         switch (command) {
             case '--scan':
-                await scanAllFlexicarts();
+                await scanAllFlexicarts(debugMode);
                 break;
                 
             case '--status':
@@ -329,6 +362,9 @@ async function main() {
         }
     } catch (error) {
         console.log(`❌ Error: ${error.message}`);
+        if (debugMode) {
+            console.log(`🔍 [DEBUG] Stack trace: ${error.stack}`);
+        }
         process.exit(1);
     }
 }

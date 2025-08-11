@@ -60,15 +60,19 @@ class FlexicartError extends Error {
  * @param {string} path - Serial port path
  * @param {Buffer} command - Command buffer to send
  * @param {number} timeout - Response timeout in milliseconds
+ * @param {boolean} debug - Enable debug output
  * @returns {Promise<Buffer>} Response buffer
  */
-async function sendCommand(path, command, timeout = 3000) {
+async function sendCommand(path, command, timeout = 3000, debug = false) {
     return new Promise((resolve, reject) => {
         let port;
         let timeoutId;
         let responseBuffer = Buffer.alloc(0);
+        const startTime = Date.now();
 
         try {
+            if (debug) console.log(`    🔌 [DEBUG] Opening port ${path}...`);
+            
             port = new SerialPort({
                 path: path,
                 baudRate: 9600,
@@ -79,25 +83,37 @@ async function sendCommand(path, command, timeout = 3000) {
             });
 
             const openTimeout = setTimeout(() => {
+                if (debug) console.log(`    ⏰ [DEBUG] Port open timeout for ${path}`);
                 port.close();
                 reject(new FlexicartError(`Port open timeout: ${path}`, 'OPEN_TIMEOUT', path));
             }, 5000);
 
             port.open((err) => {
                 clearTimeout(openTimeout);
+                const openDuration = Date.now() - startTime;
                 
                 if (err) {
+                    if (debug) console.log(`    ❌ [DEBUG] Failed to open ${path}: ${err.message} (${openDuration}ms)`);
                     reject(new FlexicartError(`Failed to open port: ${err.message}`, 'OPEN_FAILED', path));
                     return;
                 }
+                
+                if (debug) console.log(`    ✅ [DEBUG] Port ${path} opened successfully (${openDuration}ms)`);
 
                 // Set up data handler
                 port.on('data', (data) => {
                     responseBuffer = Buffer.concat([responseBuffer, data]);
                     
+                    if (debug) {
+                        console.log(`    📥 [DEBUG] Received ${data.length} bytes: ${data.toString('hex')}`);
+                        console.log(`    📥 [DEBUG] Total buffer: ${responseBuffer.length} bytes: ${responseBuffer.toString('hex')}`);
+                    }
+                    
                     // Check for complete response (ends with ETX 0x03)
                     if (data.includes(0x03)) {
                         clearTimeout(timeoutId);
+                        const totalDuration = Date.now() - startTime;
+                        if (debug) console.log(`    ✅ [DEBUG] Complete response received (${totalDuration}ms total)`);
                         port.close(() => {
                             resolve(responseBuffer);
                         });
@@ -106,6 +122,11 @@ async function sendCommand(path, command, timeout = 3000) {
 
                 // Set response timeout
                 timeoutId = setTimeout(() => {
+                    const totalDuration = Date.now() - startTime;
+                    if (debug) {
+                        console.log(`    ⏰ [DEBUG] Response timeout after ${totalDuration}ms`);
+                        console.log(`    📥 [DEBUG] Partial response: ${responseBuffer.length} bytes: ${responseBuffer.toString('hex')}`);
+                    }
                     port.close(() => {
                         if (responseBuffer.length > 0) {
                             resolve(responseBuffer);
@@ -116,62 +137,248 @@ async function sendCommand(path, command, timeout = 3000) {
                 }, timeout);
 
                 // Send command
+                if (debug) {
+                    console.log(`    📤 [DEBUG] Sending command: ${command.toString('hex')} (${command.length} bytes)`);
+                }
+                
                 port.write(command, (err) => {
+                    const writeDuration = Date.now() - startTime;
                     if (err) {
                         clearTimeout(timeoutId);
+                        if (debug) console.log(`    ❌ [DEBUG] Write failed after ${writeDuration}ms: ${err.message}`);
                         port.close();
                         reject(new FlexicartError(`Write failed: ${err.message}`, 'WRITE_FAILED', path));
+                    } else {
+                        if (debug) console.log(`    ✅ [DEBUG] Command sent successfully (${writeDuration}ms)`);
                     }
                 });
             });
 
             port.on('error', (err) => {
                 clearTimeout(timeoutId);
+                const errorDuration = Date.now() - startTime;
+                if (debug) console.log(`    ❌ [DEBUG] Port error after ${errorDuration}ms: ${err.message}`);
                 reject(new FlexicartError(`Port error: ${err.message}`, 'PORT_ERROR', path));
             });
 
         } catch (error) {
             if (timeoutId) clearTimeout(timeoutId);
             if (port && port.isOpen) port.close();
+            const catchDuration = Date.now() - startTime;
+            if (debug) console.log(`    ❌ [DEBUG] Exception after ${catchDuration}ms: ${error.message}`);
             reject(new FlexicartError(`Send command failed: ${error.message}`, 'SEND_FAILED', path));
         }
     });
 }
 
 /**
- * Auto-scan for Flexicart devices on available ports
+ * Auto-scan for Flexicart devices on available ports with detailed debugging
  * @param {Array} portPaths - Array of port paths to scan
+ * @param {boolean} debug - Enable detailed debugging output
  * @returns {Promise<Array>} Array of found Flexicart devices
  */
-async function autoScanFlexicarts(portPaths = []) {
-    console.log('🔍 Auto-scanning for Flexicart devices...');
+async function autoScanFlexicarts(portPaths = [], debug = false) {
+    if (debug) console.log('🔍 Auto-scanning for Flexicart devices (DEBUG MODE)...');
+    else console.log('🔍 Auto-scanning for Flexicart devices...');
     
-    const defaultPorts = Array.from({ length: 8 }, (_, i) => `/dev/ttyRP${i + 16}`);
+    const defaultPorts = Array.from({ length: 16 }, (_, i) => `/dev/ttyRP${i}`);
     const portsToScan = portPaths.length > 0 ? portPaths : defaultPorts;
     
     const foundDevices = [];
+    const scanResults = [];
     
     for (const port of portsToScan) {
+        const scanResult = {
+            port,
+            success: false,
+            error: null,
+            response: null,
+            responseHex: null,
+            duration: 0,
+            portExists: false,
+            portAccessible: false
+        };
+        
         try {
-            console.log(`📡 Scanning ${port}...`);
-            const response = await sendCommand(port, FLEXICART_COMMANDS.STATUS, 2000);
+            const startTime = Date.now();
             
-            if (response && response.length > 0) {
-                const status = parseFlexicartStatus(response);
-                foundDevices.push({
-                    port,
-                    status,
-                    timestamp: new Date().toISOString()
-                });
-                console.log(`✅ Flexicart found at ${port}`);
+            if (debug) console.log(`🔍 [DEBUG] Scanning ${port}...`);
+            else console.log(`📡 Scanning ${port}...`);
+            
+            // First check if port exists
+            try {
+                const fs = require('fs');
+                scanResult.portExists = fs.existsSync(port);
+                if (debug) console.log(`  🔍 [DEBUG] Port exists: ${scanResult.portExists}`);
+                
+                if (!scanResult.portExists) {
+                    scanResult.error = 'Port does not exist';
+                    if (debug) console.log(`  ❌ [DEBUG] ${port} does not exist in filesystem`);
+                    else console.log(`⚠️  No Flexicart at ${port} (port does not exist)`);
+                    scanResults.push(scanResult);
+                    continue;
+                }
+            } catch (fsError) {
+                scanResult.error = `Filesystem check failed: ${fsError.message}`;
+                if (debug) console.log(`  ❌ [DEBUG] Filesystem check failed: ${fsError.message}`);
+                scanResults.push(scanResult);
+                continue;
             }
+            
+            // Try to send command with detailed error tracking
+            try {
+                if (debug) console.log(`  📤 [DEBUG] Sending STATUS command to ${port}...`);
+                
+                const response = await sendCommand(port, FLEXICART_COMMANDS.STATUS, 2000, debug);
+                
+                scanResult.duration = Date.now() - startTime;
+                scanResult.portAccessible = true;
+                
+                if (debug) {
+                    console.log(`  📥 [DEBUG] Response received: ${response ? response.length : 0} bytes`);
+                    if (response) {
+                        console.log(`  📥 [DEBUG] Response hex: ${response.toString('hex')}`);
+                        console.log(`  📥 [DEBUG] Response ASCII: ${response.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}`);
+                    }
+                }
+                
+                if (response && response.length > 0) {
+                    scanResult.success = true;
+                    scanResult.response = response;
+                    scanResult.responseHex = response.toString('hex');
+                    
+                    const status = parseFlexicartStatus(response);
+                    foundDevices.push({
+                        port,
+                        status,
+                        timestamp: new Date().toISOString(),
+                        scanDuration: scanResult.duration
+                    });
+                    
+                    if (debug) {
+                        console.log(`  ✅ [DEBUG] Flexicart found at ${port}`);
+                        console.log(`  📊 [DEBUG] Status: ${status.statusText} (code: 0x${status.statusCode.toString(16)})`);
+                        console.log(`  ⏱️  [DEBUG] Scan duration: ${scanResult.duration}ms`);
+                    } else {
+                        console.log(`✅ Flexicart found at ${port}`);
+                    }
+                } else {
+                    scanResult.error = 'No response received';
+                    if (debug) {
+                        console.log(`  ❌ [DEBUG] No response from ${port}`);
+                        console.log(`  ⏱️  [DEBUG] Scan duration: ${scanResult.duration}ms`);
+                    } else {
+                        console.log(`⚠️  No Flexicart at ${port} (no response)`);
+                    }
+                }
+                
+            } catch (commError) {
+                scanResult.duration = Date.now() - startTime;
+                scanResult.error = commError.message;
+                
+                // Determine if port is accessible based on error type
+                if (commError.message.includes('Permission denied') || 
+                    commError.message.includes('Access denied')) {
+                    scanResult.portAccessible = false;
+                    if (debug) {
+                        console.log(`  ❌ [DEBUG] Permission denied for ${port}`);
+                        console.log(`  💡 [DEBUG] Try running with sudo or check permissions`);
+                    } else {
+                        console.log(`⚠️  No Flexicart at ${port} (permission denied)`);
+                    }
+                } else if (commError.message.includes('No such file') || 
+                          commError.message.includes('cannot open')) {
+                    scanResult.portAccessible = false;
+                    if (debug) {
+                        console.log(`  ❌ [DEBUG] Cannot access ${port}: ${commError.message}`);
+                    } else {
+                        console.log(`⚠️  No Flexicart at ${port} (cannot access)`);
+                    }
+                } else if (commError.message.includes('timeout') || 
+                          commError.message.includes('RESPONSE_TIMEOUT')) {
+                    scanResult.portAccessible = true;
+                    if (debug) {
+                        console.log(`  ⏰ [DEBUG] Timeout on ${port} - port accessible but no Flexicart response`);
+                        console.log(`  ⏱️  [DEBUG] Scan duration: ${scanResult.duration}ms`);
+                    } else {
+                        console.log(`⚠️  No Flexicart at ${port} (timeout)`);
+                    }
+                } else {
+                    if (debug) {
+                        console.log(`  ❌ [DEBUG] Communication error on ${port}: ${commError.message}`);
+                        console.log(`  ⏱️  [DEBUG] Scan duration: ${scanResult.duration}ms`);
+                    } else {
+                        console.log(`⚠️  No Flexicart at ${port} (${commError.message})`);
+                    }
+                }
+            }
+            
         } catch (error) {
-            // No device or error - continue scanning
-            console.log(`⚠️  No Flexicart at ${port}`);
+            scanResult.error = error.message;
+            scanResult.duration = Date.now() - startTime;
+            
+            if (debug) {
+                console.log(`  ❌ [DEBUG] Scan failed for ${port}: ${error.message}`);
+                console.log(`  ⏱️  [DEBUG] Scan duration: ${scanResult.duration}ms`);
+            } else {
+                console.log(`⚠️  No Flexicart at ${port} (scan failed)`);
+            }
+        }
+        
+        scanResults.push(scanResult);
+    }
+    
+    // Summary
+    console.log(`📊 Scan complete: ${foundDevices.length} Flexicart(s) found`);
+    
+    if (debug) {
+        console.log('\n🔍 [DEBUG] Detailed Scan Summary:');
+        console.log('================================');
+        
+        const existingPorts = scanResults.filter(r => r.portExists).length;
+        const accessiblePorts = scanResults.filter(r => r.portAccessible).length;
+        const respondingPorts = scanResults.filter(r => r.success).length;
+        
+        console.log(`📁 Ports that exist: ${existingPorts}/${scanResults.length}`);
+        console.log(`🔓 Ports accessible: ${accessiblePorts}/${existingPorts}`);
+        console.log(`📡 Ports responding: ${respondingPorts}/${accessiblePorts}`);
+        console.log(`✅ Flexicarts found: ${foundDevices.length}`);
+        
+        // Show error breakdown
+        const errorTypes = {};
+        scanResults.filter(r => r.error).forEach(r => {
+            const errorType = r.error.split(':')[0];
+            errorTypes[errorType] = (errorTypes[errorType] || 0) + 1;
+        });
+        
+        if (Object.keys(errorTypes).length > 0) {
+            console.log('\n🚨 Error breakdown:');
+            Object.entries(errorTypes).forEach(([error, count]) => {
+                console.log(`   ${error}: ${count} port(s)`);
+            });
+        }
+        
+        // Show timing stats
+        const durations = scanResults.map(r => r.duration);
+        const avgDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+        const maxDuration = Math.max(...durations);
+        const minDuration = Math.min(...durations);
+        
+        console.log('\n⏱️  Timing statistics:');
+        console.log(`   Average: ${avgDuration.toFixed(1)}ms`);
+        console.log(`   Fastest: ${minDuration}ms`);
+        console.log(`   Slowest: ${maxDuration}ms`);
+        
+        // Show per-port details for failed scans
+        const failedScans = scanResults.filter(r => !r.success);
+        if (failedScans.length > 0) {
+            console.log('\n❌ Failed scan details:');
+            failedScans.forEach(scan => {
+                console.log(`   ${scan.port}: ${scan.error} (${scan.duration}ms)`);
+            });
         }
     }
     
-    console.log(`📊 Scan complete: ${foundDevices.length} Flexicart(s) found`);
     return foundDevices;
 }
 
