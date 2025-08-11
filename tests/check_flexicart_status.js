@@ -25,7 +25,7 @@ const {
 } = require('../src/commands/flexicart_interface');
 
 // Flexicart-specific port configuration
-const FLEXICART_PORTS = Array.from({ length: 8 }, (_, i) => `/dev/ttyRP${i}`);
+const FLEXICART_PORTS = Array.from({ length: 16 }, (_, i) => `/dev/ttyRP${i}`);
 
 /**
  * Check status of a single Flexicart unit
