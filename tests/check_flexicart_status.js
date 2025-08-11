@@ -5,7 +5,7 @@ const readline = require('readline');
 const {
     autoScanFlexicarts,
     getFlexicartStatus,
-    sendFlexicartCommand,  // ✅ Import this from the module
+    sendFlexicartCommand,
     establishFlexicartControl,
     testFlexicartCommunication,
     getFlexicartPosition,
@@ -16,12 +16,12 @@ const {
     emergencyStopFlexicart,
     getFlexicartErrors,
     clearFlexicartErrors,
-    // Import parsing functions and constants too
     parseFlexicartStatus,
     parseFlexicartPosition,
     parseFlexicartInventory,
     FLEXICART_COMMANDS,
-    FlexicartError
+    FlexicartError,
+    testSerialConfigurations  // ✅ Add this new function
 } = require('../src/commands/flexicart_interface');
 
 // Flexicart-specific port configuration
@@ -153,6 +153,35 @@ async function testFlexicartMovementLocal(path) {
             stopTest: false,
             errors: [error.message]
         };
+    }
+}
+
+/**
+ * Test RS-422 serial settings
+ * @param {string} flexicartPath - Flexicart port path
+ */
+async function testSerialSettings(flexicartPath) {
+    console.log(`\n🔧 Testing RS-422 configurations for ${flexicartPath}...`);
+    
+    try {
+        const result = await testSerialConfigurations(flexicartPath, true);
+        
+        if (result) {
+            console.log(`\n🎯 Best configuration found: ${result.baudRate} ${result.dataBits}${result.parity[0].toUpperCase()}${result.stopBits}`);
+            console.log('💡 Update your configuration to use these settings');
+        } else {
+            console.log('\n❌ No working configuration found');
+            console.log('💡 Possible issues:');
+            console.log('   - Device not powered on');
+            console.log('   - Wrong serial port');
+            console.log('   - Cable connection problems');
+            console.log('   - Different protocol altogether');
+        }
+        
+        return result;
+    } catch (error) {
+        console.log(`❌ Serial configuration test failed: ${error.message}`);
+        return null;
     }
 }
 
@@ -310,12 +339,13 @@ async function main() {
     
     if (filteredArgs.length === 0) {
         console.log('\nUsage:');
-        console.log('  node check_flexicart_status.js --scan [--debug]    # Scan for Flexicarts');
-        console.log('  node check_flexicart_status.js --status <port>     # Check status');
-        console.log('  node check_flexicart_status.js --control <port>    # Interactive control');
-        console.log('  node check_flexicart_status.js --test <port>       # Test movement');
+        console.log('  node check_flexicart_status.js --scan [--debug]        # Scan for Flexicarts');
+        console.log('  node check_flexicart_status.js --status <port>         # Check status');
+        console.log('  node check_flexicart_status.js --control <port>        # Interactive control');
+        console.log('  node check_flexicart_status.js --test <port>           # Test movement');
+        console.log('  node check_flexicart_status.js --test-serial <port>    # Test RS-422 settings');
         console.log('\nFlags:');
-        console.log('  --debug, -d                                        # Enable detailed debugging');
+        console.log('  --debug, -d                                            # Enable detailed debugging');
         console.log('\n📋 Available Flexicart ports:');
         FLEXICART_PORTS.forEach(port => {
             console.log(`  📦 ${port}`);
@@ -354,6 +384,14 @@ async function main() {
                     return;
                 }
                 await testFlexicartMovementLocal(flexicartPath);
+                break;
+                
+            case '--test-serial':
+                if (!flexicartPath) {
+                    console.log('❌ Error: Port path required');
+                    return;
+                }
+                await testSerialSettings(flexicartPath);
                 break;
                 
             default:

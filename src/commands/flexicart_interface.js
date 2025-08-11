@@ -71,16 +71,22 @@ async function sendCommand(path, command, timeout = 3000, debug = false) {
         const startTime = Date.now();
 
         try {
-            if (debug) console.log(`    🔌 [DEBUG] Opening port ${path}...`);
+            if (debug) console.log(`    🔌 [DEBUG] Opening RS-422 port ${path}...`);
             
+            // RS-422 configuration for Sony Flexicart
             port = new SerialPort({
                 path: path,
-                baudRate: 9600,
-                dataBits: 8,
-                parity: 'none',
-                stopBits: 1,
+                baudRate: 38400,        // ✅ Updated to 38400 baud
+                dataBits: 8,           // ✅ 8 data bits
+                parity: 'even',        // ✅ Even parity (was 'none')
+                stopBits: 1,           // ✅ 1 stop bit
+                flowControl: false,    // ✅ No flow control for RS-422
                 autoOpen: false
             });
+
+            if (debug) {
+                console.log(`    📡 [DEBUG] RS-422 Settings: 38400 baud, 8E1, no flow control`);
+            }
 
             const openTimeout = setTimeout(() => {
                 if (debug) console.log(`    ⏰ [DEBUG] Port open timeout for ${path}`);
@@ -98,7 +104,7 @@ async function sendCommand(path, command, timeout = 3000, debug = false) {
                     return;
                 }
                 
-                if (debug) console.log(`    ✅ [DEBUG] Port ${path} opened successfully (${openDuration}ms)`);
+                if (debug) console.log(`    ✅ [DEBUG] RS-422 port ${path} opened successfully (${openDuration}ms)`);
 
                 // Set up data handler
                 port.on('data', (data) => {
@@ -106,11 +112,17 @@ async function sendCommand(path, command, timeout = 3000, debug = false) {
                     
                     if (debug) {
                         console.log(`    📥 [DEBUG] Received ${data.length} bytes: ${data.toString('hex')}`);
+                        console.log(`    📥 [DEBUG] ASCII: "${data.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}" `);
                         console.log(`    📥 [DEBUG] Total buffer: ${responseBuffer.length} bytes: ${responseBuffer.toString('hex')}`);
                     }
                     
-                    // Check for complete response (ends with ETX 0x03)
-                    if (data.includes(0x03)) {
+                    // Check for complete response patterns
+                    // Sony protocols often use STX (0x02) ... ETX (0x03) or CR/LF terminators
+                    if (data.includes(0x03) ||           // ETX terminator
+                        data.includes(0x0D) ||           // CR terminator  
+                        data.includes(0x0A) ||           // LF terminator
+                        responseBuffer.length >= 64) {   // Max reasonable response length
+                        
                         clearTimeout(timeoutId);
                         const totalDuration = Date.now() - startTime;
                         if (debug) console.log(`    ✅ [DEBUG] Complete response received (${totalDuration}ms total)`);
@@ -129,6 +141,7 @@ async function sendCommand(path, command, timeout = 3000, debug = false) {
                     }
                     port.close(() => {
                         if (responseBuffer.length > 0) {
+                            if (debug) console.log(`    📥 [DEBUG] Returning partial response`);
                             resolve(responseBuffer);
                         } else {
                             reject(new FlexicartError(`Response timeout: ${timeout}ms`, 'RESPONSE_TIMEOUT', path));
@@ -136,20 +149,21 @@ async function sendCommand(path, command, timeout = 3000, debug = false) {
                     });
                 }, timeout);
 
-                // Send command
+                // Send command with RS-422 considerations
                 if (debug) {
-                    console.log(`    📤 [DEBUG] Sending command: ${command.toString('hex')} (${command.length} bytes)`);
+                    console.log(`    📤 [DEBUG] Sending RS-422 command: ${command.toString('hex')} (${command.length} bytes)`);
+                    console.log(`    📤 [DEBUG] Command ASCII: "${command.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}"`);
                 }
                 
                 port.write(command, (err) => {
                     const writeDuration = Date.now() - startTime;
                     if (err) {
                         clearTimeout(timeoutId);
-                        if (debug) console.log(`    ❌ [DEBUG] Write failed after ${writeDuration}ms: ${err.message}`);
+                        if (debug) console.log(`    ❌ [DEBUG] RS-422 write failed after ${writeDuration}ms: ${err.message}`);
                         port.close();
                         reject(new FlexicartError(`Write failed: ${err.message}`, 'WRITE_FAILED', path));
                     } else {
-                        if (debug) console.log(`    ✅ [DEBUG] Command sent successfully (${writeDuration}ms)`);
+                        if (debug) console.log(`    ✅ [DEBUG] RS-422 command sent successfully (${writeDuration}ms)`);
                     }
                 });
             });
@@ -157,7 +171,7 @@ async function sendCommand(path, command, timeout = 3000, debug = false) {
             port.on('error', (err) => {
                 clearTimeout(timeoutId);
                 const errorDuration = Date.now() - startTime;
-                if (debug) console.log(`    ❌ [DEBUG] Port error after ${errorDuration}ms: ${err.message}`);
+                if (debug) console.log(`    ❌ [DEBUG] RS-422 port error after ${errorDuration}ms: ${err.message}`);
                 reject(new FlexicartError(`Port error: ${err.message}`, 'PORT_ERROR', path));
             });
 
@@ -165,7 +179,7 @@ async function sendCommand(path, command, timeout = 3000, debug = false) {
             if (timeoutId) clearTimeout(timeoutId);
             if (port && port.isOpen) port.close();
             const catchDuration = Date.now() - startTime;
-            if (debug) console.log(`    ❌ [DEBUG] Exception after ${catchDuration}ms: ${error.message}`);
+            if (debug) console.log(`    ❌ [DEBUG] RS-422 exception after ${catchDuration}ms: ${error.message}`);
             reject(new FlexicartError(`Send command failed: ${error.message}`, 'SEND_FAILED', path));
         }
     });
@@ -992,6 +1006,206 @@ function parseFlexicartErrors(response) {
     return errors;
 }
 
+/**
+ * Test multiple RS-422 configurations to find the correct one
+ * @param {string} path - Serial port path
+ * @param {boolean} debug - Enable debug output
+ * @returns {Promise<Object>} Test results with working configuration
+ */
+async function testSerialConfigurations(path, debug = false) {
+    console.log(`🔧 Testing multiple RS-422 configurations on ${path}...`);
+    
+    // Common RS-422 configurations for broadcast equipment
+    const configurations = [
+        { name: 'Sony Standard', baudRate: 38400, parity: 'even', dataBits: 8, stopBits: 1 },
+        { name: 'Sony Alternative', baudRate: 38400, parity: 'none', dataBits: 8, stopBits: 1 },
+        { name: 'Legacy Sony', baudRate: 9600, parity: 'even', dataBits: 8, stopBits: 1 },
+        { name: 'Legacy Sony Alt', baudRate: 9600, parity: 'none', dataBits: 8, stopBits: 1 },
+        { name: 'High Speed', baudRate: 115200, parity: 'even', dataBits: 8, stopBits: 1 },
+        { name: 'Standard RS-422', baudRate: 19200, parity: 'even', dataBits: 8, stopBits: 1 }
+    ];
+    
+    const testResults = [];
+    
+    for (const config of configurations) {
+        console.log(`\n🧪 Testing: ${config.name} (${config.baudRate} ${config.dataBits}${config.parity[0].toUpperCase()}${config.stopBits})`);
+        
+        try {
+            const result = await testSingleConfiguration(path, config, debug);
+            testResults.push({ ...config, ...result });
+            
+            if (result.success) {
+                console.log(`✅ SUCCESS with ${config.name}!`);
+                if (debug) {
+                    console.log(`   Response: ${result.response.toString('hex')}`);
+                    console.log(`   Duration: ${result.duration}ms`);
+                }
+                // Found working config, could return early
+                // But continue testing to see all working configs
+            } else {
+                console.log(`❌ Failed: ${result.error}`);
+            }
+            
+        } catch (error) {
+            console.log(`❌ Error: ${error.message}`);
+            testResults.push({ 
+                ...config, 
+                success: false, 
+                error: error.message,
+                duration: 0
+            });
+        }
+        
+        // Small delay between tests
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    const workingConfigs = testResults.filter(r => r.success);
+    
+    console.log(`\n📊 Test Summary: ${workingConfigs.length}/${testResults.length} configurations successful`);
+    
+    if (workingConfigs.length > 0) {
+        console.log('\n✅ Working configurations:');
+        workingConfigs.forEach(config => {
+            console.log(`   ${config.name}: ${config.baudRate} ${config.dataBits}${config.parity[0].toUpperCase()}${config.stopBits} (${config.duration}ms)`);
+        });
+        
+        // Return the fastest working configuration
+        const fastest = workingConfigs.reduce((prev, current) => 
+            (prev.duration < current.duration) ? prev : current
+        );
+        
+        console.log(`\n🏆 Recommended: ${fastest.name} (fastest response: ${fastest.duration}ms)`);
+        return fastest;
+    } else {
+        console.log('\n❌ No working configurations found');
+        return null;
+    }
+}
+
+/**
+ * Test a single serial configuration
+ * @param {string} path - Serial port path
+ * @param {Object} config - Serial configuration
+ * @param {boolean} debug - Enable debug output
+ * @returns {Promise<Object>} Test result
+ */
+async function testSingleConfiguration(path, config, debug = false) {
+    return new Promise((resolve, reject) => {
+        let port;
+        let timeoutId;
+        let responseBuffer = Buffer.alloc(0);
+        const startTime = Date.now();
+
+        try {
+            port = new SerialPort({
+                path: path,
+                baudRate: config.baudRate,
+                dataBits: config.dataBits,
+                parity: config.parity,
+                stopBits: config.stopBits,
+                flowControl: false,
+                autoOpen: false
+            });
+
+            const openTimeout = setTimeout(() => {
+                port.close();
+                resolve({ 
+                    success: false, 
+                    error: 'Open timeout',
+                    duration: Date.now() - startTime
+                });
+            }, 3000);
+
+            port.open((err) => {
+                clearTimeout(openTimeout);
+                
+                if (err) {
+                    resolve({ 
+                        success: false, 
+                        error: `Open failed: ${err.message}`,
+                        duration: Date.now() - startTime
+                    });
+                    return;
+                }
+
+                port.on('data', (data) => {
+                    responseBuffer = Buffer.concat([responseBuffer, data]);
+                    
+                    if (debug) {
+                        console.log(`      📥 [DEBUG] Data: ${data.toString('hex')}`);
+                    }
+                    
+                    // Check for response completion
+                    if (data.includes(0x03) || data.includes(0x0D) || data.includes(0x0A) || responseBuffer.length >= 32) {
+                        clearTimeout(timeoutId);
+                        const duration = Date.now() - startTime;
+                        port.close(() => {
+                            resolve({
+                                success: true,
+                                response: responseBuffer,
+                                duration: duration
+                            });
+                        });
+                    }
+                });
+
+                timeoutId = setTimeout(() => {
+                    const duration = Date.now() - startTime;
+                    port.close(() => {
+                        if (responseBuffer.length > 0) {
+                            resolve({
+                                success: true,
+                                response: responseBuffer,
+                                duration: duration,
+                                partial: true
+                            });
+                        } else {
+                            resolve({
+                                success: false,
+                                error: 'No response',
+                                duration: duration
+                            });
+                        }
+                    });
+                }, 2000);
+
+                // Send test command
+                port.write(FLEXICART_COMMANDS.STATUS, (err) => {
+                    if (err) {
+                        clearTimeout(timeoutId);
+                        port.close();
+                        resolve({
+                            success: false,
+                            error: `Write failed: ${err.message}`,
+                            duration: Date.now() - startTime
+                        });
+                    }
+                });
+            });
+
+            port.on('error', (err) => {
+                clearTimeout(timeoutId);
+                resolve({
+                    success: false,
+                    error: `Port error: ${err.message}`,
+                    duration: Date.now() - startTime
+                });
+            });
+
+        } catch (error) {
+            if (timeoutId) clearTimeout(timeoutId);
+            if (port && port.isOpen) port.close();
+            resolve({
+                success: false,
+                error: `Exception: ${error.message}`,
+                duration: Date.now() - startTime
+            });
+        }
+    });
+}
+
+// Export the new testing function
 module.exports = {
     // Main interface functions
     autoScanFlexicarts,
@@ -1024,6 +1238,8 @@ module.exports = {
     FLEXICART_COMMANDS,
     FLEXICART_STATUS_CODES,
     FLEXICART_ERROR_CODES,
-    FlexicartError
+    FlexicartError,
+    testSerialConfigurations,
+    testSingleConfiguration
 };
 
