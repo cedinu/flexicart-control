@@ -1,14 +1,11 @@
 const { SerialPort } = require('serialport');
 const readline = require('readline');
 
-// filepath: tests/check_flexicart_status.js
-
-
-// Import Flexicart-specific functions (these would need to be implemented)
+// Import Flexicart-specific functions
 const {
     autoScanFlexicarts,
     getFlexicartStatus,
-    sendFlexicartCommand,
+    sendFlexicartCommand,  // ✅ Import this from the module
     establishFlexicartControl,
     testFlexicartCommunication,
     getFlexicartPosition,
@@ -18,69 +15,17 @@ const {
     calibrateFlexicart,
     emergencyStopFlexicart,
     getFlexicartErrors,
-    clearFlexicartErrors
+    clearFlexicartErrors,
+    // Import parsing functions and constants too
+    parseFlexicartStatus,
+    parseFlexicartPosition,
+    parseFlexicartInventory,
+    FLEXICART_COMMANDS,
+    FlexicartError
 } = require('../src/commands/flexicart_interface');
 
-// Flexicart-specific constants
+// Flexicart-specific port configuration
 const FLEXICART_PORTS = Array.from({ length: 8 }, (_, i) => `/dev/ttyRP${i + 16}`);
-const FLEXICART_COMMANDS = {
-    STATUS: Buffer.from([0x02, 0x53, 0x03]), // STX S ETX
-    POSITION: Buffer.from([0x02, 0x50, 0x03]), // STX P ETX
-    INVENTORY: Buffer.from([0x02, 0x49, 0x03]), // STX I ETX
-    MOVE_HOME: Buffer.from([0x02, 0x48, 0x03]), // STX H ETX
-    STOP: Buffer.from([0x02, 0x53, 0x54, 0x03]), // STX ST ETX
-    ERROR_STATUS: Buffer.from([0x02, 0x45, 0x03]) // STX E ETX
-};
-
-class FlexicartError extends Error {
-    constructor(message, code, path) {
-        super(message);
-        this.name = 'FlexicartError';
-        this.code = code;
-        this.path = path;
-    }
-}
-
-/**
- * Send command to Flexicart with error handling
- * @param {string} path - Flexicart port path
- * @param {Buffer} command - Command buffer
- * @param {string} commandName - Command name for logging
- * @param {number} timeout - Response timeout in ms
- * @returns {Promise<Object>} Command result
- */
-async function sendFlexicartCommand(path, command, commandName, timeout = 3000) {
-    console.log(`📤 Sending ${commandName} to ${path}...`);
-    
-    try {
-        const response = await sendCommand(path, command, timeout);
-        
-        if (!response || response.length === 0) {
-            throw new FlexicartError(`No response received for ${commandName}`, 'NO_RESPONSE', path);
-        }
-        
-        console.log(`✅ ${commandName} successful`);
-        console.log(`📥 Response: ${response.toString('hex')} (${response.length} bytes)`);
-        
-        return {
-            success: true,
-            response,
-            responseHex: response.toString('hex'),
-            timestamp: new Date().toISOString()
-        };
-        
-    } catch (error) {
-        const flexError = error instanceof FlexicartError ? error : 
-            new FlexicartError(`${commandName} failed: ${error.message}`, 'COMMAND_FAILED', path);
-        
-        console.log(`❌ ${flexError.message}`);
-        return {
-            success: false,
-            error: flexError,
-            timestamp: new Date().toISOString()
-        };
-    }
-}
 
 /**
  * Check status of a single Flexicart unit
@@ -91,37 +36,32 @@ async function checkSingleFlexicart(path) {
     console.log(`\n🔍 Checking Flexicart at ${path}...`);
     
     try {
-        // Get basic status
-        const statusResult = await sendFlexicartCommand(path, FLEXICART_COMMANDS.STATUS, 'STATUS');
+        // Get basic status using imported function
+        const statusResult = await getFlexicartStatus(path);
         
         if (!statusResult.success) {
             console.log(`❌ Flexicart not responding at ${path}`);
             return null;
         }
         
-        // Parse status response
-        const status = parseFlexicartStatus(statusResult.response);
-        
         // Get position information
-        const positionResult = await sendFlexicartCommand(path, FLEXICART_COMMANDS.POSITION, 'POSITION');
-        const position = positionResult.success ? parseFlexicartPosition(positionResult.response) : null;
+        const positionResult = await getFlexicartPosition(path);
         
         // Get inventory
-        const inventoryResult = await sendFlexicartCommand(path, FLEXICART_COMMANDS.INVENTORY, 'INVENTORY');
-        const inventory = inventoryResult.success ? parseFlexicartInventory(inventoryResult.response) : null;
+        const inventoryResult = await getFlexicartInventory(path);
         
         console.log(`✅ Flexicart Found!`);
-        console.log(`   🏠 Status: ${status.status}`);
-        console.log(`   📍 Position: ${position ? position.current : 'Unknown'}`);
-        console.log(`   📦 Cartridges: ${inventory ? inventory.total : 'Unknown'}`);
-        console.log(`   ⚡ Ready: ${status.ready ? 'YES' : 'NO'}`);
-        console.log(`   🚨 Errors: ${status.errorCount || 0}`);
+        console.log(`   🏠 Status: ${statusResult.status.statusText}`);
+        console.log(`   📍 Position: ${positionResult.success ? positionResult.position.current : 'Unknown'}`);
+        console.log(`   📦 Cartridges: ${inventoryResult.success ? inventoryResult.inventory.total : 'Unknown'}`);
+        console.log(`   ⚡ Ready: ${statusResult.status.ready ? 'YES' : 'NO'}`);
+        console.log(`   🚨 Errors: ${statusResult.status.errorCount || 0}`);
         
         return {
             path,
-            status,
-            position,
-            inventory,
+            status: statusResult.status,
+            position: positionResult.success ? positionResult.position : null,
+            inventory: inventoryResult.success ? inventoryResult.inventory : null,
             timestamp: new Date().toISOString()
         };
         
@@ -132,129 +72,66 @@ async function checkSingleFlexicart(path) {
 }
 
 /**
- * Parse Flexicart status response
- * @param {Buffer} response - Raw response buffer
- * @returns {Object} Parsed status
- */
-function parseFlexicartStatus(response) {
-    // This would parse the actual Flexicart status protocol
-    // Placeholder implementation
-    const hex = response.toString('hex');
-    
-    return {
-        status: 'READY',
-        ready: true,
-        moving: false,
-        errorCount: 0,
-        raw: hex
-    };
-}
-
-/**
- * Parse Flexicart position response
- * @param {Buffer} response - Raw response buffer
- * @returns {Object} Parsed position
- */
-function parseFlexicartPosition(response) {
-    // This would parse the actual position data
-    return {
-        current: 1,
-        target: 1,
-        moving: false
-    };
-}
-
-/**
- * Parse Flexicart inventory response
- * @param {Buffer} response - Raw response buffer
- * @returns {Object} Parsed inventory
- */
-function parseFlexicartInventory(response) {
-    // This would parse the actual inventory data
-    return {
-        total: 0,
-        occupied: [],
-        empty: []
-    };
-}
-
-/**
- * Test Flexicart movement capabilities
- * @param {string} path - Flexicart port path
- * @returns {Promise<Object>} Movement test results
- */
-async function testFlexicartMovement(path) {
-    console.log(`\n🏃 Testing Flexicart movement at ${path}...`);
-    
-    const results = {
-        homeTest: false,
-        positionTest: false,
-        stopTest: false,
-        errors: []
-    };
-    
-    try {
-        // Test home command
-        console.log('🏠 Testing HOME command...');
-        const homeResult = await sendFlexicartCommand(path, FLEXICART_COMMANDS.MOVE_HOME, 'MOVE_HOME');
-        results.homeTest = homeResult.success;
-        
-        // Wait for movement to complete
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Test position movement (move to position 2 and back)
-        console.log('📍 Testing position movement...');
-        const moveResult = await moveFlexicartToPosition(path, 2);
-        results.positionTest = moveResult && moveResult.success;
-        
-        // Test stop command
-        console.log('🛑 Testing STOP command...');
-        const stopResult = await sendFlexicartCommand(path, FLEXICART_COMMANDS.STOP, 'STOP');
-        results.stopTest = stopResult.success;
-        
-        console.log('\n📊 Movement Test Results:');
-        console.log(`   🏠 Home: ${results.homeTest ? '✅' : '❌'}`);
-        console.log(`   📍 Position: ${results.positionTest ? '✅' : '❌'}`);
-        console.log(`   🛑 Stop: ${results.stopTest ? '✅' : '❌'}`);
-        
-    } catch (error) {
-        results.errors.push(error.message);
-        console.log(`❌ Movement test error: ${error.message}`);
-    }
-    
-    return results;
-}
-
-/**
  * Scan all Flexicart ports for devices
  * @returns {Promise<Array>} Array of found Flexicarts
  */
 async function scanAllFlexicarts() {
     console.log('🔍 Scanning for Flexicarts on all ports...');
     
-    const results = [];
-    
-    for (const path of FLEXICART_PORTS) {
-        try {
-            const flexicart = await checkSingleFlexicart(path);
-            if (flexicart) {
-                results.push(flexicart);
-            }
-        } catch (error) {
-            // Port not accessible or no device
+    try {
+        // Use the imported auto-scan function
+        const results = await autoScanFlexicarts(FLEXICART_PORTS);
+        
+        if (results.length === 0) {
+            console.log('❌ No Flexicarts found');
+        } else {
+            console.log(`\n✅ Found ${results.length} Flexicart(s):`);
+            results.forEach(fc => {
+                console.log(`   📦 ${fc.port} - Status: ${fc.status.statusText}`);
+            });
         }
+        
+        return results;
+    } catch (error) {
+        console.log(`❌ Scan failed: ${error.message}`);
+        return [];
     }
+}
+
+/**
+ * Enhanced test movement function using imported functions
+ * @param {string} path - Flexicart port path
+ * @returns {Promise<Object>} Movement test results
+ */
+async function testFlexicartMovementLocal(path) {
+    console.log(`\n🏃 Testing Flexicart movement at ${path}...`);
     
-    if (results.length === 0) {
-        console.log('❌ No Flexicarts found');
-    } else {
-        console.log(`\n✅ Found ${results.length} Flexicart(s):`);
-        results.forEach(fc => {
-            console.log(`   📦 ${fc.path} - Status: ${fc.status.status}`);
-        });
+    try {
+        // Use the imported comprehensive test function
+        const results = await testFlexicartMovement(path);
+        
+        console.log('\n📊 Movement Test Results:');
+        console.log(`   🏠 Home: ${results.homeTest ? '✅' : '❌'}`);
+        console.log(`   📍 Position: ${results.positionTest ? '✅' : '❌'}`);
+        console.log(`   🛑 Stop: ${results.stopTest ? '✅' : '❌'}`);
+        
+        if (results.errors.length > 0) {
+            console.log(`   ⚠️  Errors: ${results.errors.length}`);
+            results.errors.forEach(error => {
+                console.log(`      - ${error}`);
+            });
+        }
+        
+        return results;
+    } catch (error) {
+        console.log(`❌ Movement test error: ${error.message}`);
+        return {
+            homeTest: false,
+            positionTest: false,
+            stopTest: false,
+            errors: [error.message]
+        };
     }
-    
-    return results;
 }
 
 /**
@@ -283,7 +160,8 @@ async function controlFlexicart(path) {
                     break;
                     
                 case 'home':
-                    await sendFlexicartCommand(path, FLEXICART_COMMANDS.MOVE_HOME, 'MOVE_HOME');
+                    const homeResult = await sendFlexicartCommand(path, FLEXICART_COMMANDS.MOVE_HOME, 'MOVE_HOME');
+                    console.log(homeResult.success ? '✅ Home command sent' : '❌ Home command failed');
                     break;
                     
                 case 'move':
@@ -291,35 +169,82 @@ async function controlFlexicart(path) {
                     if (isNaN(position)) {
                         console.log('❌ Usage: move <position_number>');
                     } else {
-                        await moveFlexicartToPosition(path, position);
+                        const moveResult = await moveFlexicartToPosition(path, position);
+                        console.log(moveResult.success ? `✅ Moving to position ${position}` : '❌ Move command failed');
                     }
                     break;
                     
                 case 'stop':
-                    await sendFlexicartCommand(path, FLEXICART_COMMANDS.STOP, 'STOP');
+                    const stopResult = await emergencyStopFlexicart(path);
+                    console.log(stopResult.success ? '✅ Emergency stop sent' : '❌ Stop command failed');
                     break;
                     
                 case 'inventory':
-                    await sendFlexicartCommand(path, FLEXICART_COMMANDS.INVENTORY, 'INVENTORY');
+                    const inventoryResult = await getFlexicartInventory(path);
+                    if (inventoryResult.success) {
+                        const inv = inventoryResult.inventory;
+                        console.log(`📦 Inventory: ${inv.occupied.length}/${inv.total} slots occupied`);
+                        console.log(`   Occupied slots: ${inv.occupied.join(', ')}`);
+                        console.log(`   Empty slots: ${inv.empty.join(', ')}`);
+                    } else {
+                        console.log('❌ Failed to get inventory');
+                    }
                     break;
                     
                 case 'test-movement':
-                    await testFlexicartMovement(path);
+                    await testFlexicartMovementLocal(path);
                     break;
                     
                 case 'errors':
-                    await sendFlexicartCommand(path, FLEXICART_COMMANDS.ERROR_STATUS, 'ERROR_STATUS');
+                    const errorResult = await getFlexicartErrors(path);
+                    if (errorResult.success) {
+                        if (errorResult.errors.length === 0) {
+                            console.log('✅ No errors reported');
+                        } else {
+                            console.log(`⚠️  ${errorResult.errors.length} error(s) found:`);
+                            errorResult.errors.forEach((error, index) => {
+                                console.log(`   ${index + 1}. [${error.code}] ${error.description}`);
+                            });
+                        }
+                    } else {
+                        console.log('❌ Failed to get error status');
+                    }
+                    break;
+                    
+                case 'clear-errors':
+                    const clearResult = await clearFlexicartErrors(path);
+                    console.log(clearResult.success ? '✅ Errors cleared' : '❌ Failed to clear errors');
+                    break;
+                    
+                case 'calibrate':
+                    console.log('⚙️ Starting calibration (this may take a while)...');
+                    const calResult = await calibrateFlexicart(path);
+                    console.log(calResult.success ? '✅ Calibration completed' : '❌ Calibration failed');
+                    break;
+                    
+                case 'position':
+                    const posResult = await getFlexicartPosition(path);
+                    if (posResult.success) {
+                        const pos = posResult.position;
+                        console.log(`📍 Current position: ${pos.current}/${pos.total}`);
+                        console.log(`   Moving: ${pos.moving ? 'YES' : 'NO'}`);
+                    } else {
+                        console.log('❌ Failed to get position');
+                    }
                     break;
                     
                 case 'help':
                     console.log('\n📋 Available Commands:');
                     console.log('  status         - Check Flexicart status');
+                    console.log('  position       - Get current position');
                     console.log('  home           - Move to home position');
                     console.log('  move <pos>     - Move to specific position');
                     console.log('  stop           - Emergency stop');
                     console.log('  inventory      - Get cartridge inventory');
                     console.log('  test-movement  - Test movement capabilities');
                     console.log('  errors         - Check error status');
+                    console.log('  clear-errors   - Clear all errors');
+                    console.log('  calibrate      - Calibrate positioning system');
                     console.log('  quit           - Exit control mode');
                     break;
                     
@@ -344,27 +269,6 @@ async function controlFlexicart(path) {
         process.exit(0);
     });
 }
-
-// Helper function to move to specific position
-async function moveFlexicartToPosition(path, position) {
-    const moveCommand = Buffer.from([0x02, 0x4D, position, 0x03]); // STX M <pos> ETX
-    return await sendFlexicartCommand(path, moveCommand, `MOVE_TO_${position}`);
-}
-
-module.exports = {
-    checkSingleFlexicart,
-    scanAllFlexicarts,
-    testFlexicartMovement,
-    controlFlexicart,
-    sendFlexicartCommand,
-    parseFlexicartStatus,
-    parseFlexicartPosition,
-    parseFlexicartInventory,
-    moveFlexicartToPosition,
-    FlexicartError,
-    FLEXICART_PORTS,
-    FLEXICART_COMMANDS
-};
 
 // Main execution
 async function main() {
@@ -416,7 +320,7 @@ async function main() {
                     console.log('❌ Error: Port path required');
                     return;
                 }
-                await testFlexicartMovement(flexicartPath);
+                await testFlexicartMovementLocal(flexicartPath);
                 break;
                 
             default:
@@ -428,6 +332,13 @@ async function main() {
         process.exit(1);
     }
 }
+
+module.exports = {
+    checkSingleFlexicart,
+    scanAllFlexicarts,
+    testFlexicartMovementLocal,
+    controlFlexicart
+};
 
 if (require.main === module) {
     main().catch(error => {
