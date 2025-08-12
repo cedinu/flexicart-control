@@ -759,7 +759,265 @@ async function comprehensiveSonyTest(flexicartPath) {
     }
 }
 
-// Update the main function to include the comprehensive test:
+// Add the missing controlFlexicart function before the module.exports section:
+
+/**
+ * Interactive control interface for Flexicart
+ * @param {string} path - Flexicart port path
+ */
+async function controlFlexicart(path) {
+    console.log(`🎮 Interactive Flexicart Control for ${path}`);
+    console.log('===========================================');
+    
+    try {
+        // First check if Flexicart is responding
+        await checkAndClearPortLocks(path);
+        
+        const statusResult = await getFlexicartStatus(path);
+        if (!statusResult.success) {
+            console.log(`❌ Cannot establish communication with Flexicart at ${path}`);
+            return;
+        }
+        
+        console.log(`✅ Connected to Flexicart - Status: ${statusResult.status.statusText}`);
+        console.log('\n🎮 Interactive Control Menu:');
+        console.log('============================');
+        console.log('1. Get Status');
+        console.log('2. Get Position');
+        console.log('3. Get Inventory');
+        console.log('4. Move Home');
+        console.log('5. Emergency Stop');
+        console.log('6. Test Sony Commands');
+        console.log('7. Test Movement');
+        console.log('8. Move to Position');
+        console.log('9. Clear Errors');
+        console.log('0. Exit');
+        
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+        
+        const getUserInput = () => {
+            return new Promise((resolve) => {
+                rl.question('\n🎮 Enter command (1-9, 0 to exit): ', (answer) => {
+                    resolve(answer.trim());
+                });
+            });
+        };
+        
+        let running = true;
+        while (running) {
+            const choice = await getUserInput();
+            
+            switch (choice) {
+                case '1':
+                    console.log('\n📊 Getting status...');
+                    try {
+                        const result = await getFlexicartStatus(path);
+                        if (result.success) {
+                            console.log(`   Status: ${result.status.statusText}`);
+                            console.log(`   Ready: ${result.status.ready ? 'YES' : 'NO'}`);
+                            console.log(`   Moving: ${result.status.moving ? 'YES' : 'NO'}`);
+                            console.log(`   Errors: ${result.status.errorCount}`);
+                        } else {
+                            console.log(`   ❌ Failed: ${result.error}`);
+                        }
+                    } catch (error) {
+                        console.log(`   ❌ Error: ${error.message}`);
+                    }
+                    break;
+                    
+                case '2':
+                    console.log('\n📍 Getting position...');
+                    try {
+                        const result = await getFlexicartPosition(path);
+                        if (result.success) {
+                            console.log(`   Current Position: ${result.position.current}`);
+                            console.log(`   Target Position: ${result.position.target}`);
+                            console.log(`   Moving: ${result.position.moving ? 'YES' : 'NO'}`);
+                            console.log(`   Homed: ${result.position.homed ? 'YES' : 'NO'}`);
+                        } else {
+                            console.log(`   ❌ Failed: ${result.error}`);
+                        }
+                    } catch (error) {
+                        console.log(`   ❌ Error: ${error.message}`);
+                    }
+                    break;
+                    
+                case '3':
+                    console.log('\n📦 Getting inventory...');
+                    try {
+                        const result = await getFlexicartInventory(path);
+                        if (result.success) {
+                            console.log(`   Total Slots: ${result.inventory.total}`);
+                            console.log(`   Occupied: ${result.inventory.occupied.join(', ') || 'None'}`);
+                            console.log(`   Empty: ${result.inventory.empty.join(', ') || 'None'}`);
+                        } else {
+                            console.log(`   ❌ Failed: ${result.error}`);
+                        }
+                    } catch (error) {
+                        console.log(`   ❌ Error: ${error.message}`);
+                    }
+                    break;
+                    
+                case '4':
+                    console.log('\n🏠 Moving to home position...');
+                    try {
+                        const result = await moveFlexicartToPosition(path, 0); // Assuming 0 is home
+                        if (result.success) {
+                            console.log(`   ✅ Home command sent`);
+                            console.log(`   Status: ${result.status ? result.status.statusText : 'Unknown'}`);
+                        } else {
+                            console.log(`   ❌ Failed: ${result.error}`);
+                        }
+                    } catch (error) {
+                        console.log(`   ❌ Error: ${error.message}`);
+                    }
+                    break;
+                    
+                case '5':
+                    console.log('\n🛑 Emergency stop...');
+                    try {
+                        const result = await emergencyStopFlexicart(path);
+                        if (result.success) {
+                            console.log(`   ✅ Emergency stop activated`);
+                            console.log(`   Status: ${result.status ? result.status.statusText : 'Stopped'}`);
+                        } else {
+                            console.log(`   ❌ Failed: ${result.error}`);
+                        }
+                    } catch (error) {
+                        console.log(`   ❌ Error: ${error.message}`);
+                    }
+                    break;
+                    
+                case '6':
+                    console.log('\n🎌 Testing Sony commands...');
+                    try {
+                        const deviceInfo = await getSonyDeviceInfo(path, false);
+                        if (deviceInfo.success) {
+                            console.log(`   ✅ Sony device detected`);
+                            if (deviceInfo.deviceInfo.deviceType) {
+                                console.log(`   Device Type: ${deviceInfo.deviceInfo.deviceType.decoded}`);
+                            }
+                            if (deviceInfo.deviceInfo.position) {
+                                console.log(`   Position: ${deviceInfo.deviceInfo.position.decoded}`);
+                            }
+                            if (deviceInfo.deviceInfo.status) {
+                                console.log(`   Status: ${deviceInfo.deviceInfo.status.interpretation}`);
+                            }
+                        } else {
+                            console.log(`   ❌ Sony command test failed`);
+                        }
+                    } catch (error) {
+                        console.log(`   ❌ Error: ${error.message}`);
+                    }
+                    break;
+                    
+                case '7':
+                    console.log('\n🏃 Testing movement...');
+                    try {
+                        const result = await testFlexicartMovement(path);
+                        if (result.success) {
+                            console.log(`   ✅ Movement test completed`);
+                            console.log(`   Home: ${result.testResults.homeTest ? '✅' : '❌'}`);
+                            console.log(`   Position: ${result.testResults.positionTest ? '✅' : '❌'}`);
+                            console.log(`   Stop: ${result.testResults.stopTest ? '✅' : '❌'}`);
+                        } else {
+                            console.log(`   ❌ Movement test failed`);
+                            if (result.testResults.errors.length > 0) {
+                                result.testResults.errors.forEach(error => {
+                                    console.log(`   Error: ${error}`);
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        console.log(`   ❌ Error: ${error.message}`);
+                    }
+                    break;
+                    
+                case '8':
+                    const positionInput = await new Promise((resolve) => {
+                        rl.question('Enter target position (1-20): ', (answer) => {
+                            resolve(answer.trim());
+                        });
+                    });
+                    
+                    const targetPos = parseInt(positionInput);
+                    if (isNaN(targetPos) || targetPos < 1 || targetPos > 20) {
+                        console.log('❌ Invalid position. Please enter a number between 1 and 20.');
+                        break;
+                    }
+                    
+                    console.log(`\n📍 Moving to position ${targetPos}...`);
+                    try {
+                        // Try Sony position movement first
+                        const sonyResult = await testSonyPositionMovement(path, targetPos, false);
+                        if (sonyResult.success) {
+                            console.log(`   ✅ Moved to position ${targetPos}`);
+                            console.log(`   Final Position: ${sonyResult.finalPosition}`);
+                        } else {
+                            // Fallback to standard movement
+                            const result = await moveFlexicartToPosition(path, targetPos);
+                            if (result.success) {
+                                console.log(`   ✅ Move command sent to position ${targetPos}`);
+                            } else {
+                                console.log(`   ❌ Failed: ${result.error}`);
+                            }
+                        }
+                    } catch (error) {
+                        console.log(`   ❌ Error: ${error.message}`);
+                    }
+                    break;
+                    
+                case '9':
+                    console.log('\n🧹 Clearing errors...');
+                    try {
+                        const result = await clearFlexicartErrors(path);
+                        if (result.success) {
+                            console.log(`   ✅ Errors cleared`);
+                            console.log(`   Status: ${result.status ? result.status.statusText : 'OK'}`);
+                        } else {
+                            console.log(`   ❌ Failed: ${result.error}`);
+                        }
+                    } catch (error) {
+                        console.log(`   ❌ Error: ${error.message}`);
+                    }
+                    break;
+                    
+                case '0':
+                    console.log('\n👋 Exiting interactive control...');
+                    running = false;
+                    break;
+                    
+                default:
+                    console.log('❌ Invalid choice. Please enter 1-9 or 0 to exit.');
+                    break;
+            }
+        }
+        
+        rl.close();
+        console.log('✅ Interactive control session ended.');
+        
+    } catch (error) {
+        console.log(`❌ Control interface error: ${error.message}`);
+    }
+}
+
+// Update the module.exports section at the bottom:
+module.exports = {
+    checkSingleFlexicart,
+    scanAllFlexicarts,
+    testFlexicartMovementLocal,
+    controlFlexicart,  // Now properly defined
+    testSonyCommands,
+    testSonyMovement,
+    comprehensiveSonyTest,
+    mapProtocol,
+    testSerialSettings
+};
+
+// Update the main function to include the missing case:
 async function main() {
     const args = process.argv.slice(2);
     
@@ -777,16 +1035,17 @@ async function main() {
     
     if (filteredArgs.length === 0) {
         console.log('\nUsage:');
-        console.log('  node check_flexicart_status.js --scan [--debug]        # Scan for Flexicarts');
-        console.log('  node check_flexicart_status.js --status <port>         # Check status');
-        console.log('  node check_flexicart_status.js --control <port>        # Interactive control');
-        console.log('  node check_flexicart_status.js --test <port>           # Test movement');
-        console.log('  node check_flexicart_status.js --test-serial <port>    # Test RS-422 settings');
-        console.log('  node check_flexicart_status.js --map-protocol <port>   # Map device protocol');
-        console.log('  node check_flexicart_status.js --test-sony <port>      # Test Sony commands');
-        console.log('  node check_flexicart_status.js --test-movement <port>  # Test Sony movement');
+        console.log('  node check_flexicart_status.js --scan [--debug]          # Scan for Flexicarts');
+        console.log('  node check_flexicart_status.js --status <port>           # Check status');
+        console.log('  node check_flexicart_status.js --control <port>          # Interactive control');
+        console.log('  node check_flexicart_status.js --test <port>             # Test movement');
+        console.log('  node check_flexicart_status.js --test-serial <port>      # Test RS-422 settings');
+        console.log('  node check_flexicart_status.js --map-protocol <port>     # Map device protocol');
+        console.log('  node check_flexicart_status.js --test-sony <port>        # Test Sony commands');
+        console.log('  node check_flexicart_status.js --test-movement <port>    # Test Sony movement');
+        console.log('  node check_flexicart_status.js --comprehensive-sony <port> # Full Sony analysis');
         console.log('\nFlags:');
-        console.log('  --debug, -d                                            # Enable detailed debugging');
+        console.log('  --debug, -d                                              # Enable detailed debugging');
         console.log('\n📋 Available Flexicart ports:');
         FLEXICART_PORTS.forEach(port => {
             console.log(`  📦 ${port}`);
@@ -869,7 +1128,7 @@ async function main() {
                 
             default:
                 console.log(`❌ Unknown command: ${command}`);
-                console.log('💡 Use --help to see available commands');
+                console.log('💡 Use without arguments to see available commands');
         }
     } catch (error) {
         console.log(`❌ Error: ${error.message}`);
@@ -878,18 +1137,4 @@ async function main() {
         }
         process.exit(1);
     }
-}
-
-module.exports = {
-    checkSingleFlexicart,
-    scanAllFlexicarts,
-    testFlexicartMovementLocal,
-    controlFlexicart
-};
-
-if (require.main === module) {
-    main().catch(error => {
-        console.error('❌ Fatal error:', error.message);
-        process.exit(1);
-    });
 }

@@ -240,6 +240,82 @@ async function testSonyMovementCommands(path, debug = false) {
 }
 
 /**
+ * Test specific position movement
+ * @param {string} path - Serial port path
+ * @param {number} targetPosition - Target position number
+ * @param {boolean} debug - Enable debug output
+ * @returns {Promise<Object>} Position movement result
+ */
+async function testSonyPositionMovement(path, targetPosition, debug = false) {
+    if (debug) console.log(`📍 Testing Sony position movement to slot ${targetPosition}...`);
+    
+    try {
+        // Get current position
+        const currentPosResponse = await sendCommand(path, SONY_COMMANDS.POSITION_STATUS, 3000, debug);
+        const currentAnalysis = analyzeSonyResponse(currentPosResponse);
+        const currentPosition = currentAnalysis.nonSyncBytes.length >= 2 ? 
+            (currentAnalysis.nonSyncBytes[0] << 8) | currentAnalysis.nonSyncBytes[1] : 0;
+        
+        if (debug) console.log(`   📍 Current position: ${currentPosition}`);
+        
+        // Create and send position command
+        const positionCommand = createSonyPositionCommand(targetPosition);
+        if (debug) console.log(`   📤 Sending position command: ${positionCommand.toString('hex')}`);
+        
+        const moveResponse = await sendCommand(path, positionCommand, 10000, debug);
+        const moveAnalysis = analyzeSonyResponse(moveResponse);
+        
+        // Wait for movement to complete
+        if (debug) console.log(`   ⏳ Waiting for movement to complete...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Check final position
+        const finalPosResponse = await sendCommand(path, SONY_COMMANDS.POSITION_STATUS, 3000, debug);
+        const finalAnalysis = analyzeSonyResponse(finalPosResponse);
+        const finalPosition = finalAnalysis.nonSyncBytes.length >= 2 ? 
+            (finalAnalysis.nonSyncBytes[0] << 8) | finalAnalysis.nonSyncBytes[1] : 0;
+        
+        if (debug) console.log(`   📍 Final position: ${finalPosition}`);
+        
+        const success = Math.abs(finalPosition - targetPosition) <= 1; // Allow 1 position tolerance
+        
+        return {
+            success: success,
+            targetPosition: targetPosition,
+            currentPosition: currentPosition,
+            finalPosition: finalPosition,
+            moved: currentPosition !== finalPosition,
+            reachedTarget: success,
+            moveResponse: moveAnalysis,
+            raw: {
+                command: positionCommand.toString('hex'),
+                moveResponse: moveResponse.toString('hex'),
+                currentPos: currentPosResponse.toString('hex'),
+                finalPos: finalPosResponse.toString('hex')
+            }
+        };
+        
+    } catch (error) {
+        if (debug) console.log(`❌ Position movement failed: ${error.message}`);
+        return {
+            success: false,
+            error: error.message,
+            targetPosition: targetPosition
+        };
+    }
+}
+
+/**
+ * Create a position command for Sony Flexicart
+ * @param {number} position - Target position (0-255)
+ * @returns {Buffer} Sony position command
+ */
+function createSonyPositionCommand(position) {
+    // Sony VTR position command format: [0x90, 0x24, high_byte, low_byte]
+    return Buffer.from([0x90, 0x24, 0x00, position & 0xFF]);
+}
+
+/**
  * Interpret Sony status bytes
  * @param {Array} statusBytes - Array of status bytes
  * @returns {string} Interpretation
@@ -314,82 +390,6 @@ function analyzeSonyResponse(response) {
         syncPercentage: (syncByteCount / response.length * 100).toFixed(1),
         hex: response.toString('hex')
     };
-}
-
-/**
- * Create a position command for Sony Flexicart
- * @param {number} position - Target position (0-255)
- * @returns {Buffer} Sony position command
- */
-function createSonyPositionCommand(position) {
-    // Sony VTR position command format: [0x90, 0x24, high_byte, low_byte]
-    return Buffer.from([0x90, 0x24, 0x00, position & 0xFF]);
-}
-
-/**
- * Test specific position movement
- * @param {string} path - Serial port path
- * @param {number} targetPosition - Target position number
- * @param {boolean} debug - Enable debug output
- * @returns {Promise<Object>} Position movement result
- */
-async function testSonyPositionMovement(path, targetPosition, debug = false) {
-    if (debug) console.log(`📍 Testing Sony position movement to slot ${targetPosition}...`);
-    
-    try {
-        // Get current position
-        const currentPosResponse = await sendCommand(path, SONY_COMMANDS.POSITION_STATUS, 3000, debug);
-        const currentAnalysis = analyzeSonyResponse(currentPosResponse);
-        const currentPosition = currentAnalysis.nonSyncBytes.length >= 2 ? 
-            (currentAnalysis.nonSyncBytes[0] << 8) | currentAnalysis.nonSyncBytes[1] : 0;
-        
-        if (debug) console.log(`   📍 Current position: ${currentPosition}`);
-        
-        // Create and send position command
-        const positionCommand = createSonyPositionCommand(targetPosition);
-        if (debug) console.log(`   📤 Sending position command: ${positionCommand.toString('hex')}`);
-        
-        const moveResponse = await sendCommand(path, positionCommand, 10000, debug);
-        const moveAnalysis = analyzeSonyResponse(moveResponse);
-        
-        // Wait for movement to complete
-        if (debug) console.log(`   ⏳ Waiting for movement to complete...`);
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        // Check final position
-        const finalPosResponse = await sendCommand(path, SONY_COMMANDS.POSITION_STATUS, 3000, debug);
-        const finalAnalysis = analyzeSonyResponse(finalPosResponse);
-        const finalPosition = finalAnalysis.nonSyncBytes.length >= 2 ? 
-            (finalAnalysis.nonSyncBytes[0] << 8) | finalAnalysis.nonSyncBytes[1] : 0;
-        
-        if (debug) console.log(`   📍 Final position: ${finalPosition}`);
-        
-        const success = Math.abs(finalPosition - targetPosition) <= 1; // Allow 1 position tolerance
-        
-        return {
-            success: success,
-            targetPosition: targetPosition,
-            currentPosition: currentPosition,
-            finalPosition: finalPosition,
-            moved: currentPosition !== finalPosition,
-            reachedTarget: success,
-            moveResponse: moveAnalysis,
-            raw: {
-                command: positionCommand.toString('hex'),
-                moveResponse: moveResponse.toString('hex'),
-                currentPos: currentPosResponse.toString('hex'),
-                finalPos: finalPosResponse.toString('hex')
-            }
-        };
-        
-    } catch (error) {
-        if (debug) console.log(`❌ Position movement failed: ${error.message}`);
-        return {
-            success: false,
-            error: error.message,
-            targetPosition: targetPosition
-        };
-    }
 }
 
 module.exports = {
