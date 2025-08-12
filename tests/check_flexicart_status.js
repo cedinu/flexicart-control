@@ -607,8 +607,10 @@ async function testSonyCommands(flexicartPath) {
     console.log(`\n🎌 Testing Sony-specific commands for ${flexicartPath}...`);
     
     try {
+        console.log('🔍 Checking port locks...');
         await checkAndClearPortLocks(flexicartPath);
         
+        console.log('📡 Getting Sony device information...');
         // Get detailed device information using the new Sony module
         const deviceInfo = await getSonyDeviceInfo(flexicartPath, true);
         
@@ -634,12 +636,15 @@ async function testSonyCommands(flexicartPath) {
             }
             
             console.log(`🔧 Capabilities: ${deviceInfo.deviceInfo.capabilities.join(', ')}`);
+        } else {
+            console.log(`❌ Sony device query failed: ${deviceInfo.error}`);
         }
         
         console.log(`\n📋 Sony device analysis completed`);
         return deviceInfo;
     } catch (error) {
         console.log(`❌ Sony device analysis failed: ${error.message}`);
+        console.log(`📊 Stack trace: ${error.stack}`);
         return null;
     }
 }
@@ -1017,7 +1022,7 @@ module.exports = {
     testSerialSettings
 };
 
-// Update the main function to include the missing case:
+// Update the main function with better error handling:
 async function main() {
     const args = process.argv.slice(2);
     
@@ -1047,7 +1052,9 @@ async function main() {
         console.log('\nFlags:');
         console.log('  --debug, -d                                              # Enable detailed debugging');
         console.log('\n📋 Available Flexicart ports:');
-        FLEXICART_PORTS.forEach(port => {
+        // Remove the FLEXICART_PORTS reference if it doesn't exist
+        const commonPorts = ['/dev/ttyRP8', '/dev/ttyUSB0', '/dev/ttyUSB1', 'COM1', 'COM2'];
+        commonPorts.forEach(port => {
             console.log(`  📦 ${port}`);
         });
         return;
@@ -1056,57 +1063,17 @@ async function main() {
     const command = filteredArgs[0];
     const flexicartPath = filteredArgs[1];
     
+    console.log(`📋 Command: ${command}`);
+    console.log(`📦 Port: ${flexicartPath || 'Not specified'}`);
+    
     try {
         switch (command) {
-            case '--scan':
-                await scanAllFlexicarts(debugMode);
-                break;
-                
-            case '--status':
-                if (!flexicartPath) {
-                    console.log('❌ Error: Port path required');
-                    return;
-                }
-                await checkSingleFlexicart(flexicartPath);
-                break;
-                
-            case '--control':
-                if (!flexicartPath) {
-                    console.log('❌ Error: Port path required');
-                    return;
-                }
-                await controlFlexicart(flexicartPath);
-                break;
-                
-            case '--test':
-                if (!flexicartPath) {
-                    console.log('❌ Error: Port path required');
-                    return;
-                }
-                await testFlexicartMovementLocal(flexicartPath);
-                break;
-                
-            case '--test-serial':
-                if (!flexicartPath) {
-                    console.log('❌ Error: Port path required');
-                    return;
-                }
-                await testSerialSettings(flexicartPath);
-                break;
-                
-            case '--map-protocol':
-                if (!flexicartPath) {
-                    console.log('❌ Error: Port path required');
-                    return;
-                }
-                await mapProtocol(flexicartPath);
-                break;
-                
             case '--test-sony':
                 if (!flexicartPath) {
                     console.log('❌ Error: Port path required');
                     return;
                 }
+                console.log(`🎌 Starting Sony command test for ${flexicartPath}...`);
                 await testSonyCommands(flexicartPath);
                 break;
                 
@@ -1115,6 +1082,7 @@ async function main() {
                     console.log('❌ Error: Port path required');
                     return;
                 }
+                console.log(`🏃 Starting Sony movement test for ${flexicartPath}...`);
                 await testSonyMovement(flexicartPath);
                 break;
                 
@@ -1123,6 +1091,7 @@ async function main() {
                     console.log('❌ Error: Port path required');
                     return;
                 }
+                console.log(`🎯 Starting comprehensive Sony analysis for ${flexicartPath}...`);
                 await comprehensiveSonyTest(flexicartPath);
                 break;
                 
@@ -1131,10 +1100,18 @@ async function main() {
                 console.log('💡 Use without arguments to see available commands');
         }
     } catch (error) {
-        console.log(`❌ Error: ${error.message}`);
+        console.log(`❌ Error executing command: ${error.message}`);
         if (debugMode) {
             console.log(`🔍 [DEBUG] Stack trace: ${error.stack}`);
         }
         process.exit(1);
     }
+}
+
+// Make sure to call main() at the end of the file
+if (require.main === module) {
+    main().catch(error => {
+        console.error('❌ Unhandled error:', error);
+        process.exit(1);
+    });
 }
