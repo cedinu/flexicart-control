@@ -1524,24 +1524,18 @@ module.exports = {
     parseFlexicartStatus,
     parseFlexicartPosition,
     parseFlexicartInventory,
-    parseFlexicartVersion,
-    parseFlexicartMoveResponse,
-    parseFlexicartCalibrationResponse,
-    parseFlexicartErrors,
     
-    // Analysis and mapping functions
-    analyzeFlexicartResponse,
-    mapFlexicartProtocol,
-    testSerialConfigurations,
-    testSingleConfiguration,
+    // Analysis and mapping functions (these need to be properly defined)
+    testSerialConfigurations: testSerialConfigurations || (() => { throw new Error('testSerialConfigurations not implemented'); }),
+    mapFlexicartProtocol: mapFlexicartProtocol || (() => { throw new Error('mapFlexicartProtocol not implemented'); }),
+    testSonyFlexicartCommands: testSonyFlexicartCommands || (() => { throw new Error('testSonyFlexicartCommands not implemented'); }),
+    testSonyFlexicartMovement: testSonyFlexicartMovement || (() => { throw new Error('testSonyFlexicartMovement not implemented'); }),
     
     // Utility functions
     sendCommand,
     
     // Constants and classes
     FLEXICART_COMMANDS,
-    FLEXICART_STATUS_CODES,
-    FLEXICART_ERROR_CODES,
     FlexicartError
 };
 
