@@ -22,7 +22,9 @@ const {
     FLEXICART_COMMANDS,
     FlexicartError,
     testSerialConfigurations,
-    mapFlexicartProtocol  // ✅ Add this new function
+    mapFlexicartProtocol,
+    testSonyFlexicartCommands,
+    testSonyFlexicartMovement
 } = require('../src/commands/flexicart_interface');
 
 // Flexicart-specific port configuration
@@ -267,9 +269,46 @@ async function mapProtocol(flexicartPath) {
 }
 
 /**
- * Interactive Flexicart control
- * @param {string} path - Flexicart port path
+ * Test Sony-specific commands on the Flexicart
+ * @param {string} flexicartPath - Flexicart port path
  */
+async function testSonyCommands(flexicartPath) {
+    console.log(`\n🎌 Testing Sony-specific commands for ${flexicartPath}...`);
+    
+    try {
+        await checkAndClearPortLocks(flexicartPath);
+        
+        const results = await testSonyFlexicartCommands(flexicartPath, true);
+        
+        console.log(`\n📋 Sony command testing completed`);
+        return results;
+    } catch (error) {
+        console.log(`❌ Sony command testing failed: ${error.message}`);
+        return null;
+    }
+}
+
+/**
+ * Test Sony movement commands
+ * @param {string} flexicartPath - Flexicart port path
+ */
+async function testSonyMovement(flexicartPath) {
+    console.log(`\n🏃 Testing Sony movement commands for ${flexicartPath}...`);
+    
+    try {
+        await checkAndClearPortLocks(flexicartPath);
+        
+        const results = await testSonyFlexicartMovement(flexicartPath, true);
+        
+        console.log(`\n📋 Sony movement testing completed`);
+        return results;
+    } catch (error) {
+        console.log(`❌ Sony movement testing failed: ${error.message}`);
+        return null;
+    }
+}
+
+// Interactive Flexicart control
 async function controlFlexicart(path) {
     console.log(`🎛️ Interactive Flexicart Control - ${path}`);
     console.log('Type "help" for available commands, "quit" to exit');
@@ -426,6 +465,8 @@ async function main() {
         console.log('  node check_flexicart_status.js --test <port>           # Test movement');
         console.log('  node check_flexicart_status.js --test-serial <port>    # Test RS-422 settings');
         console.log('  node check_flexicart_status.js --map-protocol <port>   # Map device protocol');
+        console.log('  node check_flexicart_status.js --test-sony <port>      # Test Sony commands');
+        console.log('  node check_flexicart_status.js --test-movement <port>  # Test Sony movement');
         console.log('\nFlags:');
         console.log('  --debug, -d                                            # Enable detailed debugging');
         console.log('\n📋 Available Flexicart ports:');
@@ -482,6 +523,22 @@ async function main() {
                     return;
                 }
                 await mapProtocol(flexicartPath);
+                break;
+                
+            case '--test-sony':
+                if (!flexicartPath) {
+                    console.log('❌ Error: Port path required');
+                    return;
+                }
+                await testSonyCommands(flexicartPath);
+                break;
+                
+            case '--test-movement':
+                if (!flexicartPath) {
+                    console.log('❌ Error: Port path required');
+                    return;
+                }
+                await testSonyMovement(flexicartPath);
                 break;
                 
             default:

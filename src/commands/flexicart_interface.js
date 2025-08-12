@@ -843,9 +843,18 @@ async function clearFlexicartErrors(path) {
  * @returns {Object} Parsed status
  */
 function parseFlexicartStatus(response) {
+    // Check if this looks like a Sony sync response
+    if (response && response.length >= 32) {
+        const syncByteCount = response.filter(byte => byte === 0x55).length;
+        if (syncByteCount > response.length * 0.8) {
+            // This is likely a Sony sync response
+            return decodeSonyFlexicartStatus(response);
+        }
+    }
+    
+    // Fall back to original parsing for other response types
     const analysis = analyzeFlexicartResponse(response);
     
-    // Basic status structure
     const status = {
         statusCode: 0xFF,
         statusText: 'UNKNOWN',
@@ -860,67 +869,20 @@ function parseFlexicartStatus(response) {
         return status;
     }
     
-    // Handle different response types based on analysis
-    switch (analysis.type) {
-        case 'SIMPLE_STATUS':
-            const statusByte = response[0];
-            status.statusCode = statusByte;
-            
-            // Map common status codes
-            switch (statusByte) {
-                case 0x00:
-                    status.statusText = 'IDLE';
-                    status.ready = true;
-                    break;
-                case 0x01:
-                    status.statusText = 'MOVING';
-                    status.moving = true;
-                    break;
-                case 0x06:
-                    status.statusText = 'ACK';
-                    status.ready = true;
-                    break;
-                case 0x15:
-                    status.statusText = 'NAK';
-                    status.errorCount = 1;
-                    break;
-                case 0xFF:
-                    status.statusText = 'ERROR';
-                    status.errorCount = 1;
-                    break;
-                default:
-                    status.statusText = `STATUS_${statusByte.toString(16).toUpperCase()}`;
-            }
-            break;
-            
-        case 'STRUCTURED_RESPONSE':
-            // For structured responses, try to extract status from known positions
-            if (analysis.interpretation.sections) {
-                const dataSection = analysis.interpretation.sections.find(s => s.name === 'DATA');
-                if (dataSection && dataSection.value.length > 0) {
-                    // First byte of data section might be status
-                    const firstDataByte = dataSection.value[0];
-                    status.statusCode = firstDataByte;
-                    status.statusText = `STRUCT_${firstDataByte.toString(16).toUpperCase()}`;
-                    
-                    // Check for common patterns in structured data
-                    if (firstDataByte === 0xFF) {
-                        status.statusText = 'READY';
-                        status.ready = true;
-                    } else if (firstDataByte === 0xFD) {
-                        status.statusText = 'BUSY';
-                        status.moving = true;
-                    }
-                }
-            }
-            break;
-            
-        default:
-            // Fallback parsing
-            if (response.length >= 1) {
-                status.statusCode = response[0];
-                status.statusText = 'UNKNOWN';
-            }
+    // Original parsing logic...
+    if (response.length >= 1) {
+        status.statusCode = response[0];
+        status.statusText = FLEXICART_STATUS_CODES[response[0]] || `STATUS_${response[0].toString(16).toUpperCase()}`;
+        
+        if (response[0] === 0x04 || response[0] === 0x00) {
+            status.ready = true;
+        }
+        if (response[0] === 0x01) {
+            status.moving = true;
+        }
+        if (response[0] === 0x03) {
+            status.errorCount = 1;
+        }
     }
     
     return status;
@@ -1218,36 +1180,184 @@ function analyzeFlexicartResponse(response, port = '') {
 }
 
 /**
- * Send different command types to map the protocol
+ * Enhanced analysis for Sony Flexicart with 0x55 sync pattern responses
+ * @param {Buffer} response - Raw response buffer
+ * @param {string} port - Port path for context
+ * @returns {Object} Detailed analysis
+ */
+function analyzeSonyFlexicartResponse(response, port = '') {
+    if (!response || response.length === 0) {
+        return {
+            type: 'EMPTY',
+            valid: false,
+            analysis: 'No response received'
+        };
+    }
+    
+    const hex = response.toString('hex');
+    console.log(`🔍 [SONY ANALYSIS] Analyzing response from ${port}:`);
+    console.log(`   Length: ${response.length} bytes`);
+    console.log(`   Hex: ${hex}`);
+    
+    // Count sync bytes (0x55)
+    const syncByteCount = response.filter(byte => byte === 0x55).length;
+    const nonSyncBytes = response.filter(byte => byte !== 0x55);
+    
+    const analysis = {
+        type: 'SONY_SYNC_RESPONSE',
+        valid: true,
+        totalBytes: response.length,
+        syncBytes: syncByteCount,
+        dataBytes: response.length - syncByteCount,
+        syncPercentage: (syncByteCount / response.length * 100).toFixed(1),
+        nonSyncBytes: nonSyncBytes,
+        interpretation: {},
+        patterns: []
+    };
+    
+    console.log(`   📊 Sync bytes (0x55): ${syncByteCount}/${response.length} (${analysis.syncPercentage}%)`);
+    
+    if (nonSyncBytes.length > 0) {
+        console.log(`   📋 Non-sync bytes: ${nonSyncBytes.map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ')}`);
+        analysis.interpretation.dataBytesHex = nonSyncBytes.map(b => b.toString(16).padStart(2, '0')).join('');
+        
+        // Analyze non-sync byte patterns
+        const uniqueNonSync = [...new Set(nonSyncBytes)];
+        analysis.interpretation.uniqueDataBytes = uniqueNonSync;
+        
+        if (uniqueNonSync.includes(0x57)) {
+            analysis.patterns.push('CONTAINS_0x57');
+            analysis.interpretation.status57 = 'Byte 0x57 detected - possible status indicator';
+        }
+        
+        if (uniqueNonSync.includes(0x00)) {
+            analysis.patterns.push('CONTAINS_NULL');
+            analysis.interpretation.nullBytes = 'Null bytes present - possible padding or end markers';
+        }
+        
+        // Check for specific Sony patterns
+        if (nonSyncBytes.length === 1 && nonSyncBytes[0] === 0x57) {
+            analysis.interpretation.sonyStatus = 'Single 0x57 byte suggests specific device status';
+        }
+    } else {
+        analysis.interpretation.pureSync = 'Response is pure sync bytes - device may be in idle/ready state';
+    }
+    
+    // Determine likely meaning
+    if (syncByteCount >= 60 && response.length >= 64) {
+        analysis.interpretation.meaning = 'Sony Flexicart sync response - device is responding but may be in standby/ready mode';
+        analysis.interpretation.recommendation = 'Device is communicating. Try specific Sony commands or different command formats.';
+    }
+    
+    return analysis;
+}
+
+/**
+ * Decode Sony Flexicart status from sync-heavy response
+ * @param {Buffer} response - Raw response buffer
+ * @returns {Object} Decoded status
+ */
+function decodeSonyFlexicartStatus(response) {
+    const analysis = analyzeSonyFlexicartResponse(response);
+    
+    const status = {
+        statusCode: 0x55, // Default to sync byte
+        statusText: 'SONY_READY',
+        ready: true,
+        moving: false,
+        errorCount: 0,
+        deviceType: 'SONY_FLEXICART',
+        communicating: true,
+        raw: response ? response.toString('hex') : '',
+        analysis: analysis
+    };
+    
+    if (!response || response.length === 0) {
+        status.statusText = 'NO_RESPONSE';
+        status.ready = false;
+        status.communicating = false;
+        return status;
+    }
+    
+    // Analyze non-sync bytes for status information
+    const nonSyncBytes = response.filter(byte => byte !== 0x55);
+    
+    if (nonSyncBytes.length === 0) {
+        // Pure sync response
+        status.statusText = 'SONY_IDLE';
+        status.interpretation = 'Device is idle and ready for commands';
+    } else if (nonSyncBytes.length === 1) {
+        const statusByte = nonSyncBytes[0];
+        status.statusCode = statusByte;
+        
+        switch (statusByte) {
+            case 0x57:
+                status.statusText = 'SONY_ACTIVE';
+                status.interpretation = 'Device is active and responding';
+                break;
+            case 0x00:
+                status.statusText = 'SONY_STANDBY';
+                status.interpretation = 'Device in standby mode';
+                break;
+            case 0xFF:
+                status.statusText = 'SONY_ERROR';
+                status.errorCount = 1;
+                status.ready = false;
+                break;
+            default:
+                status.statusText = `SONY_STATUS_${statusByte.toString(16).toUpperCase()}`;
+                status.interpretation = `Unknown status byte: 0x${statusByte.toString(16)}`;
+        }
+    } else {
+        // Multiple non-sync bytes - could be data payload
+        status.statusText = 'SONY_DATA_RESPONSE';
+        status.interpretation = `Response contains ${nonSyncBytes.length} data bytes`;
+        status.dataBytes = nonSyncBytes;
+    }
+    
+    return status;
+}
+
+/**
+ * Send Sony-specific commands to Flexicart
  * @param {string} path - Serial port path
  * @param {boolean} debug - Enable debug output
- * @returns {Promise<Object>} Command mapping results
+ * @returns {Promise<Object>} Sony command test results
  */
-async function mapFlexicartProtocol(path, debug = false) {
-    console.log(`🗺️ Mapping Flexicart protocol for ${path}...`);
+async function testSonyFlexicartCommands(path, debug = false) {
+    console.log(`🎌 Testing Sony-specific Flexicart commands on ${path}...`);
     
-    const testCommands = [
-        { name: 'STATUS', command: Buffer.from([0x02, 0x53, 0x03]) },           // STX S ETX
-        { name: 'POSITION', command: Buffer.from([0x02, 0x50, 0x03]) },         // STX P ETX
-        { name: 'VERSION', command: Buffer.from([0x02, 0x56, 0x03]) },          // STX V ETX
-        { name: 'INVENTORY', command: Buffer.from([0x02, 0x49, 0x03]) },        // STX I ETX
-        { name: 'ERROR_STATUS', command: Buffer.from([0x02, 0x45, 0x03]) },     // STX E ETX
-        { name: 'SIMPLE_STATUS', command: Buffer.from([0x53]) },                // S
-        { name: 'QUERY', command: Buffer.from([0x3F]) },                        // ?
-        { name: 'PING', command: Buffer.from([0x10]) },                         // DLE
-        { name: 'ENQ', command: Buffer.from([0x05]) },                          // ENQ
-        { name: 'RESET', command: Buffer.from([0x02, 0x52, 0x03]) }             // STX R ETX
+    const sonyCommands = [
+        // Sony VTR-style commands
+        { name: 'SONY_STATUS', command: Buffer.from([0x90, 0x60, 0x00, 0x00]) },
+        { name: 'SONY_SENSE', command: Buffer.from([0x90, 0x61, 0x00, 0x00]) },
+        { name: 'SONY_DEVICE_TYPE', command: Buffer.from([0x90, 0x11, 0x00, 0x00]) },
+        { name: 'SONY_POSITION', command: Buffer.from([0x90, 0x10, 0x00, 0x00]) },
+        
+        // Alternative Sony formats
+        { name: 'SONY_ID_REQUEST', command: Buffer.from([0x88, 0x01]) },
+        { name: 'SONY_STATUS_REQ', command: Buffer.from([0x88, 0x20]) },
+        
+        // Simple query commands
+        { name: 'QUESTION_MARK', command: Buffer.from([0x3F, 0x0D]) },
+        { name: 'STATUS_QUERY', command: Buffer.from([0x53, 0x3F, 0x0D]) },
+        { name: 'ID_QUERY', command: Buffer.from([0x49, 0x44, 0x3F, 0x0D]) },
+        
+        // Control commands
+        { name: 'STOP_CMD', command: Buffer.from([0x53, 0x54, 0x4F, 0x50, 0x0D]) },
+        { name: 'HOME_CMD', command: Buffer.from([0x48, 0x4F, 0x4D, 0x45, 0x0D]) }
     ];
     
     const results = [];
     
-    for (const testCmd of testCommands) {
-        console.log(`\n🧪 Testing command: ${testCmd.name}`);
+    for (const testCmd of sonyCommands) {
+        console.log(`\n🧪 Testing Sony command: ${testCmd.name}`);
         console.log(`   Command bytes: ${testCmd.command.toString('hex')}`);
         
         try {
             const response = await sendCommand(path, testCmd.command, 3000, debug);
-            const analysis = analyzeFlexicartResponse(response, path);
+            const analysis = analyzeSonyFlexicartResponse(response, path);
+            const status = decodeSonyFlexicartStatus(response);
             
             results.push({
                 command: testCmd.name,
@@ -1256,12 +1366,17 @@ async function mapFlexicartProtocol(path, debug = false) {
                 response: response,
                 responseHex: response.toString('hex'),
                 responseLength: response.length,
-                analysis: analysis
+                analysis: analysis,
+                status: status
             });
             
             console.log(`   ✅ Response: ${response.length} bytes`);
-            console.log(`   📊 Type: ${analysis.type}`);
-            console.log(`   🔍 Patterns: ${analysis.patterns.join(', ') || 'None'}`);
+            console.log(`   📊 Status: ${status.statusText}`);
+            console.log(`   🔍 Sync: ${analysis.syncBytes}/${analysis.totalBytes} bytes`);
+            
+            if (analysis.nonSyncBytes && analysis.nonSyncBytes.length > 0) {
+                console.log(`   📋 Data: ${analysis.nonSyncBytes.map(b => '0x' + b.toString(16)).join(', ')}`);
+            }
             
         } catch (error) {
             results.push({
@@ -1279,311 +1394,113 @@ async function mapFlexicartProtocol(path, debug = false) {
     }
     
     // Analyze results
-    console.log('\n📊 Protocol Mapping Summary:');
-    console.log('============================');
+    console.log('\n📊 Sony Command Test Summary:');
+    console.log('==============================');
     
     const successful = results.filter(r => r.success);
-    const failed = results.filter(r => !r.success);
+    const withData = successful.filter(r => r.analysis.dataBytes > 0);
+    const pureSync = successful.filter(r => r.analysis.dataBytes === 0);
     
     console.log(`✅ Successful commands: ${successful.length}/${results.length}`);
-    console.log(`❌ Failed commands: ${failed.length}/${results.length}`);
+    console.log(`📋 Commands with data bytes: ${withData.length}`);
+    console.log(`🔄 Pure sync responses: ${pureSync.length}`);
     
-    if (successful.length > 0) {
-        console.log('\n✅ Working commands:');
-        successful.forEach(result => {
-            console.log(`   ${result.command}: ${result.responseLength} bytes (${result.analysis.type})`);
+    if (withData.length > 0) {
+        console.log('\n📋 Commands returning data:');
+        withData.forEach(result => {
+            console.log(`   ${result.command}: ${result.analysis.dataBytes} data bytes - ${result.status.statusText}`);
         });
-        
-        // Find best commands for different purposes
-        const statusCommands = successful.filter(r => 
-            r.analysis.type === 'SIMPLE_STATUS' || 
-            r.command.includes('STATUS') ||
-            r.responseLength <= 4
-        );
-        
-        const dataCommands = successful.filter(r => 
-            r.analysis.type === 'STRUCTURED_RESPONSE' ||
-            r.responseLength > 10
-        );
-        
-        if (statusCommands.length > 0) {
-            console.log('\n📊 Best status commands:');
-            statusCommands.forEach(cmd => {
-                console.log(`   ${cmd.command}: ${cmd.commandBytes} → ${cmd.responseHex}`);
-            });
-        }
-        
-        if (dataCommands.length > 0) {
-            console.log('\n📦 Best data commands:');
-            dataCommands.forEach(cmd => {
-                console.log(`   ${cmd.command}: ${cmd.commandBytes} → ${cmd.responseLength} bytes`);
-            });
-        }
+    }
+    
+    // Find most promising commands
+    const bestCommands = withData.sort((a, b) => b.analysis.dataBytes - a.analysis.dataBytes);
+    if (bestCommands.length > 0) {
+        console.log('\n🏆 Most promising commands (most data):');
+        bestCommands.slice(0, 3).forEach(cmd => {
+            console.log(`   ${cmd.command}: ${cmd.commandBytes} → ${cmd.analysis.dataBytes} data bytes`);
+        });
     }
     
     return results;
 }
 
 /**
- * Test multiple RS-422 configurations with improved cleanup and delays
+ * Try to control the Sony Flexicart with various movement commands
  * @param {string} path - Serial port path
  * @param {boolean} debug - Enable debug output
- * @returns {Promise<Object>} Test results with working configuration
+ * @returns {Promise<Object>} Movement test results
  */
-async function testSerialConfigurations(path, debug = false) {
-    console.log(`🔧 Testing multiple RS-422 configurations on ${path}...`);
+async function testSonyFlexicartMovement(path, debug = false) {
+    console.log(`🏃 Testing Sony Flexicart movement commands on ${path}...`);
     
-    // Check if port exists first
-    try {
-        const fs = require('fs');
-        if (!fs.existsSync(path)) {
-            console.log(`❌ Port ${path} does not exist`);
-            return null;
-        }
-        if (debug) console.log(`✅ [DEBUG] Port ${path} exists`);
-    } catch (fsError) {
-        console.log(`❌ Cannot check port existence: ${fsError.message}`);
-        return null;
-    }
-    
-    // Common RS-422 configurations for broadcast equipment
-    const configurations = [
-        { name: 'Sony Standard', baudRate: 38400, parity: 'even', dataBits: 8, stopBits: 1 },
-        { name: 'Sony Alternative', baudRate: 38400, parity: 'none', dataBits: 8, stopBits: 1 },
-        { name: 'Legacy Sony', baudRate: 9600, parity: 'even', dataBits: 8, stopBits: 1 },
-        { name: 'Legacy Sony Alt', baudRate: 9600, parity: 'none', dataBits: 8, stopBits: 1 },
-        { name: 'High Speed', baudRate: 115200, parity: 'even', dataBits: 8, stopBits: 1 },
-        { name: 'Standard RS-422', baudRate: 19200, parity: 'even', dataBits: 8, stopBits: 1 }
+    const movementCommands = [
+        // Sony VTR movement commands
+        { name: 'SONY_STOP', command: Buffer.from([0x90, 0x20, 0x00, 0x00]) },
+        { name: 'SONY_EJECT', command: Buffer.from([0x90, 0x2A, 0x00, 0x00]) },
+        { name: 'SONY_LOAD', command: Buffer.from([0x90, 0x2B, 0x00, 0x00]) },
+        
+        // Position commands
+        { name: 'SONY_GOTO_POS1', command: Buffer.from([0x90, 0x24, 0x00, 0x01]) },
+        { name: 'SONY_GOTO_POS2', command: Buffer.from([0x90, 0x24, 0x00, 0x02]) },
+        
+        // Text-based commands
+        { name: 'HOME_TEXT', command: Buffer.from('HOME\r') },
+        { name: 'STOP_TEXT', command: Buffer.from('STOP\r') },
+        { name: 'POS1_TEXT', command: Buffer.from('POS 1\r') },
+        { name: 'EJECT_TEXT', command: Buffer.from('EJECT\r') }
     ];
     
-    const testResults = [];
+    const results = [];
     
-    for (let i = 0; i < configurations.length; i++) {
-        const config = configurations[i];
-        console.log(`\n🧪 Testing: ${config.name} (${config.baudRate} ${config.dataBits}${config.parity[0].toUpperCase()}${config.stopBits})`);
+    for (const testCmd of movementCommands) {
+        console.log(`\n🧪 Testing movement: ${testCmd.name}`);
+        console.log(`   Command: ${testCmd.command.toString('hex')} ("${testCmd.command.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}")`);
         
         try {
-            // Add extra delay before each test to ensure port is fully released
-            if (i > 0) {
-                if (debug) console.log(`   ⏳ [DEBUG] Waiting for port cleanup...`);
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
+            const response = await sendCommand(path, testCmd.command, 5000, debug); // Longer timeout for movement
+            const analysis = analyzeSonyFlexicartResponse(response, path);
+            const status = decodeSonyFlexicartStatus(response);
             
-            const result = await testSingleConfiguration(path, config, debug);
-            testResults.push({ ...config, ...result });
+            results.push({
+                command: testCmd.name,
+                commandBytes: testCmd.command.toString('hex'),
+                success: true,
+                response: response,
+                responseHex: response.toString('hex'),
+                responseLength: response.length,
+                analysis: analysis,
+                status: status
+            });
             
-            if (result.success) {
-                console.log(`✅ SUCCESS with ${config.name}!`);
-                if (debug) {
-                    console.log(`   Response: ${result.response.toString('hex')}`);
-                    console.log(`   Duration: ${result.duration}ms`);
-                }
-            } else {
-                console.log(`❌ Failed: ${result.error}`);
+            console.log(`   ✅ Response: ${response.length} bytes - ${status.statusText}`);
+            
+            // Check if response indicates movement
+            if (analysis.nonSyncBytes && analysis.nonSyncBytes.some(b => b !== 0x55 && b !== 0x57)) {
+                console.log(`   🏃 Possible movement response detected`);
             }
             
         } catch (error) {
-            console.log(`❌ Error: ${error.message}`);
-            testResults.push({ 
-                ...config, 
-                success: false, 
-                error: error.message,
-                duration: 0
-            });
-        }
-        
-        // Extra delay between tests for port cleanup
-        if (debug) console.log(`   ⏳ [DEBUG] Post-test delay...`);
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    
-    const workingConfigs = testResults.filter(r => r.success);
-    
-    console.log(`\n📊 Test Summary: ${workingConfigs.length}/${testResults.length} configurations successful`);
-    
-    if (workingConfigs.length > 0) {
-        console.log('\n✅ Working configurations:');
-        workingConfigs.forEach(config => {
-            console.log(`   ${config.name}: ${config.baudRate} ${config.dataBits}${config.parity[0].toUpperCase()}${config.stopBits} (${config.duration}ms)`);
-        });
-        
-        // Return the fastest working configuration
-        const fastest = workingConfigs.reduce((prev, current) => 
-            (prev.duration < current.duration) ? prev : current
-        );
-        
-        console.log(`\n🏆 Recommended: ${fastest.name} (fastest response: ${fastest.duration}ms)`);
-        return fastest;
-    } else {
-        console.log('\n❌ No working configurations found');
-        return null;
-    }
-}
-
-/**
- * Test a single serial configuration with improved port cleanup
- * @param {string} path - Serial port path
- * @param {Object} config - Serial configuration
- * @param {boolean} debug - Enable debug output
- * @returns {Promise<Object>} Test result
- */
-async function testSingleConfiguration(path, config, debug = false) {
-    return new Promise((resolve, reject) => {
-        let port;
-        let timeoutId;
-        let openTimeout;
-        let responseBuffer = Buffer.alloc(0);
-        const startTime = Date.now();
-        let isResolved = false;
-
-        function cleanup(result) {
-            if (isResolved) return;
-            isResolved = true;
-            
-            // Clear all timeouts
-            if (timeoutId) clearTimeout(timeoutId);
-            if (openTimeout) clearTimeout(openTimeout);
-            
-            // Close port safely
-            if (port) {
-                try {
-                    if (port.isOpen) {
-                        port.removeAllListeners();
-                        port.close((err) => {
-                            if (debug && err) console.log(`      ⚠️  [DEBUG] Close error: ${err.message}`);
-                            // Add small delay after close to ensure port is fully released
-                            setTimeout(() => resolve(result), 100);
-                        });
-                    } else {
-                        setTimeout(() => resolve(result), 100);
-                    }
-                } catch (closeError) {
-                    if (debug) console.log(`      ⚠️  [DEBUG] Close exception: ${closeError.message}`);
-                    setTimeout(() => resolve(result), 100);
-                }
-            } else {
-                setTimeout(() => resolve(result), 100);
-            }
-        }
-
-        try {
-            if (debug) console.log(`      🔌 [DEBUG] Creating port instance for ${path}...`);
-            
-            port = new SerialPort({
-                path: path,
-                baudRate: config.baudRate,
-                dataBits: config.dataBits,
-                parity: config.parity,
-                stopBits: config.stopBits,
-                flowControl: false,
-                autoOpen: false,
-                lock: false  // ✅ Disable port locking
-            });
-
-            // Set open timeout
-            openTimeout = setTimeout(() => {
-                if (debug) console.log(`      ⏰ [DEBUG] Open timeout`);
-                cleanup({ 
-                    success: false, 
-                    error: 'Open timeout',
-                    duration: Date.now() - startTime
-                });
-            }, 3000);
-
-            // Handle port errors
-            port.on('error', (err) => {
-                if (debug) console.log(`      ❌ [DEBUG] Port error: ${err.message}`);
-                cleanup({
-                    success: false,
-                    error: `Port error: ${err.message}`,
-                    duration: Date.now() - startTime
-                });
-            });
-
-            port.open((err) => {
-                if (openTimeout) {
-                    clearTimeout(openTimeout);
-                    openTimeout = null;
-                }
-                
-                if (err) {
-                    if (debug) console.log(`      ❌ [DEBUG] Open failed: ${err.message}`);
-                    cleanup({ 
-                        success: false, 
-                        error: `Open failed: ${err.message}`,
-                        duration: Date.now() - startTime
-                    });
-                    return;
-                }
-                
-                if (debug) console.log(`      ✅ [DEBUG] Port opened successfully`);
-
-                // Set up data handler
-                port.on('data', (data) => {
-                    responseBuffer = Buffer.concat([responseBuffer, data]);
-                    
-                    if (debug) {
-                        console.log(`      📥 [DEBUG] Data: ${data.toString('hex')}`);
-                    }
-                    
-                    // Check for response completion
-                    if (data.includes(0x03) || data.includes(0x0D) || data.includes(0x0A) || responseBuffer.length >= 32) {
-                        if (debug) console.log(`      ✅ [DEBUG] Response complete`);
-                        cleanup({
-                            success: true,
-                            response: responseBuffer,
-                            duration: Date.now() - startTime
-                        });
-                    }
-                });
-
-                // Set response timeout
-                timeoutId = setTimeout(() => {
-                    if (debug) console.log(`      ⏰ [DEBUG] Response timeout`);
-                    const duration = Date.now() - startTime;
-                    
-                    if (responseBuffer.length > 0) {
-                        cleanup({
-                            success: true,
-                            response: responseBuffer,
-                            duration: duration,
-                            partial: true
-                        });
-                    } else {
-                        cleanup({
-                            success: false,
-                            error: 'No response',
-                            duration: duration
-                        });
-                    }
-                }, 2000);
-
-                // Send test command
-                if (debug) console.log(`      📤 [DEBUG] Sending command...`);
-                
-                port.write(FLEXICART_COMMANDS.STATUS, (err) => {
-                    if (err) {
-                        if (debug) console.log(`      ❌ [DEBUG] Write failed: ${err.message}`);
-                        cleanup({
-                            success: false,
-                            error: `Write failed: ${err.message}`,
-                            duration: Date.now() - startTime
-                        });
-                    } else {
-                        if (debug) console.log(`      ✅ [DEBUG] Command sent`);
-                    }
-                });
-            });
-
-        } catch (error) {
-            if (debug) console.log(`      ❌ [DEBUG] Exception: ${error.message}`);
-            cleanup({
+            results.push({
+                command: testCmd.name,
+                commandBytes: testCmd.command.toString('hex'),
                 success: false,
-                error: `Exception: ${error.message}`,
-                duration: Date.now() - startTime
+                error: error.message
             });
+            
+            console.log(`   ❌ Failed: ${error.message}`);
         }
-    });
+        
+        // Longer delay for movement commands
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    console.log('\n📊 Movement Command Summary:');
+    console.log('=============================');
+    
+    const successful = results.filter(r => r.success);
+    console.log(`✅ Movement commands tested: ${successful.length}/${results.length}`);
+    
+    return results;
 }
 
 // Export the new testing function
