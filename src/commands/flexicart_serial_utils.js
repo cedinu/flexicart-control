@@ -74,7 +74,7 @@ async function sendCommand(path, command, timeout = 3000, debug = false) {
             // RS-422 configuration for Sony Flexicart
             port = new SerialPort({
                 path: path,
-                baudRate: 9600,        
+                baudRate: 38400,        
                 dataBits: 8,           
                 parity: 'even',        
                 stopBits: 1,           
