@@ -21,7 +21,8 @@ const {
     parseFlexicartInventory,
     FLEXICART_COMMANDS,
     FlexicartError,
-    testSerialConfigurations  // ✅ Add this new function
+    testSerialConfigurations,
+    mapFlexicartProtocol  // ✅ Add this new function
 } = require('../src/commands/flexicart_interface');
 
 // Flexicart-specific port configuration
@@ -243,6 +244,29 @@ async function testSerialSettings(flexicartPath) {
 }
 
 /**
+ * Map the protocol for a specific Flexicart
+ * @param {string} flexicartPath - Flexicart port path
+ */
+async function mapProtocol(flexicartPath) {
+    console.log(`\n🗺️ Mapping protocol for Flexicart at ${flexicartPath}...`);
+    
+    try {
+        // First check and clear any port locks
+        await checkAndClearPortLocks(flexicartPath);
+        
+        const results = await mapFlexicartProtocol(flexicartPath, true);
+        
+        console.log(`\n📋 Protocol mapping completed`);
+        console.log('💡 Use the working commands to build your application logic');
+        
+        return results;
+    } catch (error) {
+        console.log(`❌ Protocol mapping failed: ${error.message}`);
+        return null;
+    }
+}
+
+/**
  * Interactive Flexicart control
  * @param {string} path - Flexicart port path
  */
@@ -401,6 +425,7 @@ async function main() {
         console.log('  node check_flexicart_status.js --control <port>        # Interactive control');
         console.log('  node check_flexicart_status.js --test <port>           # Test movement');
         console.log('  node check_flexicart_status.js --test-serial <port>    # Test RS-422 settings');
+        console.log('  node check_flexicart_status.js --map-protocol <port>   # Map device protocol');
         console.log('\nFlags:');
         console.log('  --debug, -d                                            # Enable detailed debugging');
         console.log('\n📋 Available Flexicart ports:');
@@ -449,6 +474,14 @@ async function main() {
                     return;
                 }
                 await testSerialSettings(flexicartPath);
+                break;
+                
+            case '--map-protocol':
+                if (!flexicartPath) {
+                    console.log('❌ Error: Port path required');
+                    return;
+                }
+                await mapProtocol(flexicartPath);
                 break;
                 
             default:

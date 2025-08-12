@@ -843,29 +843,87 @@ async function clearFlexicartErrors(path) {
  * @returns {Object} Parsed status
  */
 function parseFlexicartStatus(response) {
-    if (!response || response.length < 3) {
-        return {
-            statusCode: 0xFF,
-            statusText: 'UNKNOWN',
-            ready: false,
-            moving: false,
-            errorCount: 0,
-            raw: response ? response.toString('hex') : ''
-        };
+    const analysis = analyzeFlexicartResponse(response);
+    
+    // Basic status structure
+    const status = {
+        statusCode: 0xFF,
+        statusText: 'UNKNOWN',
+        ready: false,
+        moving: false,
+        errorCount: 0,
+        raw: response ? response.toString('hex') : '',
+        analysis: analysis
+    };
+    
+    if (!response || response.length === 0) {
+        return status;
     }
     
-    // Assuming response format: STX <status_byte> <error_count> ETX
-    const statusByte = response[1];
-    const errorCount = response.length > 2 ? response[2] : 0;
+    // Handle different response types based on analysis
+    switch (analysis.type) {
+        case 'SIMPLE_STATUS':
+            const statusByte = response[0];
+            status.statusCode = statusByte;
+            
+            // Map common status codes
+            switch (statusByte) {
+                case 0x00:
+                    status.statusText = 'IDLE';
+                    status.ready = true;
+                    break;
+                case 0x01:
+                    status.statusText = 'MOVING';
+                    status.moving = true;
+                    break;
+                case 0x06:
+                    status.statusText = 'ACK';
+                    status.ready = true;
+                    break;
+                case 0x15:
+                    status.statusText = 'NAK';
+                    status.errorCount = 1;
+                    break;
+                case 0xFF:
+                    status.statusText = 'ERROR';
+                    status.errorCount = 1;
+                    break;
+                default:
+                    status.statusText = `STATUS_${statusByte.toString(16).toUpperCase()}`;
+            }
+            break;
+            
+        case 'STRUCTURED_RESPONSE':
+            // For structured responses, try to extract status from known positions
+            if (analysis.interpretation.sections) {
+                const dataSection = analysis.interpretation.sections.find(s => s.name === 'DATA');
+                if (dataSection && dataSection.value.length > 0) {
+                    // First byte of data section might be status
+                    const firstDataByte = dataSection.value[0];
+                    status.statusCode = firstDataByte;
+                    status.statusText = `STRUCT_${firstDataByte.toString(16).toUpperCase()}`;
+                    
+                    // Check for common patterns in structured data
+                    if (firstDataByte === 0xFF) {
+                        status.statusText = 'READY';
+                        status.ready = true;
+                    } else if (firstDataByte === 0xFD) {
+                        status.statusText = 'BUSY';
+                        status.moving = true;
+                    }
+                }
+            }
+            break;
+            
+        default:
+            // Fallback parsing
+            if (response.length >= 1) {
+                status.statusCode = response[0];
+                status.statusText = 'UNKNOWN';
+            }
+    }
     
-    return {
-        statusCode: statusByte,
-        statusText: FLEXICART_STATUS_CODES[statusByte] || 'UNKNOWN',
-        ready: statusByte === 0x04,
-        moving: statusByte === 0x01,
-        errorCount: errorCount,
-        raw: response.toString('hex')
-    };
+    return status;
 }
 
 /**
@@ -1037,296 +1095,233 @@ function parseFlexicartErrors(response) {
 }
 
 /**
- * Test a single serial configuration with improved port cleanup
- * @param {string} path - Serial port path
- * @param {Object} config - Serial configuration
- * @param {boolean} debug - Enable debug output
- * @returns {Promise<Object>} Test result
+ * Analyze and decode Flexicart response patterns
+ * @param {Buffer} response - Raw response buffer
+ * @param {string} port - Port path for context
+ * @returns {Object} Analyzed response data
  */
-async function testSingleConfiguration(path, config, debug = false) {
-    return new Promise((resolve, reject) => {
-        let port;
-        let timeoutId;
-        let openTimeout;
-        let responseBuffer = Buffer.alloc(0);
-        const startTime = Date.now();
-        let isResolved = false;
-
-        function cleanup(result) {
-            if (isResolved) return;
-            isResolved = true;
-            
-            // Clear all timeouts
-            if (timeoutId) clearTimeout(timeoutId);
-            if (openTimeout) clearTimeout(openTimeout);
-            
-            // Close port safely
-            if (port) {
-                try {
-                    if (port.isOpen) {
-                        port.removeAllListeners();
-                        port.close((err) => {
-                            if (debug && err) console.log(`      ⚠️  [DEBUG] Close error: ${err.message}`);
-                            // Add small delay after close to ensure port is fully released
-                            setTimeout(() => resolve(result), 100);
-                        });
-                    } else {
-                        setTimeout(() => resolve(result), 100);
-                    }
-                } catch (closeError) {
-                    if (debug) console.log(`      ⚠️  [DEBUG] Close exception: ${closeError.message}`);
-                    setTimeout(() => resolve(result), 100);
-                }
-            } else {
-                setTimeout(() => resolve(result), 100);
-            }
+function analyzeFlexicartResponse(response, port = '') {
+    if (!response || response.length === 0) {
+        return {
+            type: 'EMPTY',
+            valid: false,
+            analysis: 'No response received'
+        };
+    }
+    
+    const hex = response.toString('hex');
+    const ascii = response.toString('ascii').replace(/[^\x20-\x7E]/g, '.');
+    
+    console.log(`🔍 [ANALYSIS] Analyzing response from ${port}:`);
+    console.log(`   Length: ${response.length} bytes`);
+    console.log(`   Hex: ${hex}`);
+    console.log(`   ASCII: "${ascii}"`);
+    
+    // Pattern analysis
+    const analysis = {
+        type: 'UNKNOWN',
+        valid: false,
+        patterns: [],
+        interpretation: {},
+        suggestions: []
+    };
+    
+    // Check for common Sony patterns
+    if (hex.includes('5555')) {
+        analysis.patterns.push('SYNC_PATTERN_5555');
+        analysis.interpretation.syncPattern = 'Sony sync bytes detected (0x55)';
+    }
+    
+    if (hex.includes('ffff')) {
+        analysis.patterns.push('MARKER_FFFF');
+        analysis.interpretation.marker = 'Marker bytes detected (0xFF)';
+    }
+    
+    if (hex.includes('fdfd')) {
+        analysis.patterns.push('SEPARATOR_FDFD');
+        analysis.interpretation.separator = 'Separator pattern detected (0xFD)';
+    }
+    
+    // Check for simple status responses
+    if (response.length === 1) {
+        const byte = response[0];
+        analysis.type = 'SIMPLE_STATUS';
+        analysis.valid = true;
+        analysis.interpretation.status = `Single byte status: 0x${byte.toString(16).padStart(2, '0')}`;
+        
+        if (byte === 0x00) {
+            analysis.interpretation.meaning = 'Possible idle/ready state';
+        } else if (byte === 0xFF) {
+            analysis.interpretation.meaning = 'Possible error/busy state';
+        } else if (byte === 0x06) {
+            analysis.interpretation.meaning = 'Possible ACK (command accepted)';
+        } else if (byte === 0x15) {
+            analysis.interpretation.meaning = 'Possible NAK (command rejected)';
         }
-
-        try {
-            if (debug) console.log(`      🔌 [DEBUG] Creating port instance for ${path}...`);
+    }
+    
+    // Check for structured responses
+    if (response.length > 10 && hex.startsWith('5555')) {
+        analysis.type = 'STRUCTURED_RESPONSE';
+        analysis.valid = true;
+        analysis.interpretation.structure = 'Multi-byte structured response with sync pattern';
+        
+        // Try to decode sections
+        const sections = [];
+        let offset = 0;
+        
+        // Skip sync bytes
+        while (offset < response.length && response[offset] === 0x55) {
+            offset++;
+        }
+        
+        if (offset < response.length) {
+            sections.push({
+                name: 'SYNC',
+                start: 0,
+                end: offset - 1,
+                value: response.slice(0, offset),
+                hex: response.slice(0, offset).toString('hex')
+            });
             
-            port = new SerialPort({
-                path: path,
-                baudRate: config.baudRate,
-                dataBits: config.dataBits,
-                parity: config.parity,
-                stopBits: config.stopBits,
-                flowControl: false,
-                autoOpen: false,
-                lock: false  // ✅ Disable port locking
-            });
-
-            // Set open timeout
-            openTimeout = setTimeout(() => {
-                if (debug) console.log(`      ⏰ [DEBUG] Open timeout`);
-                cleanup({ 
-                    success: false, 
-                    error: 'Open timeout',
-                    duration: Date.now() - startTime
-                });
-            }, 3000);
-
-            // Handle port errors
-            port.on('error', (err) => {
-                if (debug) console.log(`      ❌ [DEBUG] Port error: ${err.message}`);
-                cleanup({
-                    success: false,
-                    error: `Port error: ${err.message}`,
-                    duration: Date.now() - startTime
-                });
-            });
-
-            port.open((err) => {
-                if (openTimeout) {
-                    clearTimeout(openTimeout);
-                    openTimeout = null;
-                }
-                
-                if (err) {
-                    if (debug) console.log(`      ❌ [DEBUG] Open failed: ${err.message}`);
-                    cleanup({ 
-                        success: false, 
-                        error: `Open failed: ${err.message}`,
-                        duration: Date.now() - startTime
-                    });
-                    return;
-                }
-                
-                if (debug) console.log(`      ✅ [DEBUG] Port opened successfully`);
-
-                // Set up data handler
-                port.on('data', (data) => {
-                    responseBuffer = Buffer.concat([responseBuffer, data]);
-                    
-                    if (debug) {
-                        console.log(`      📥 [DEBUG] Data: ${data.toString('hex')}`);
-                    }
-                    
-                    // Check for response completion
-                    if (data.includes(0x03) || data.includes(0x0D) || data.includes(0x0A) || responseBuffer.length >= 32) {
-                        if (debug) console.log(`      ✅ [DEBUG] Response complete`);
-                        cleanup({
-                            success: true,
-                            response: responseBuffer,
-                            duration: Date.now() - startTime
-                        });
-                    }
-                });
-
-                // Set response timeout
-                timeoutId = setTimeout(() => {
-                    if (debug) console.log(`      ⏰ [DEBUG] Response timeout`);
-                    const duration = Date.now() - startTime;
-                    
-                    if (responseBuffer.length > 0) {
-                        cleanup({
-                            success: true,
-                            response: responseBuffer,
-                            duration: duration,
-                            partial: true
-                        });
-                    } else {
-                        cleanup({
-                            success: false,
-                            error: 'No response',
-                            duration: duration
-                        });
-                    }
-                }, 2000);
-
-                // Send test command
-                if (debug) console.log(`      📤 [DEBUG] Sending command...`);
-                
-                port.write(FLEXICART_COMMANDS.STATUS, (err) => {
-                    if (err) {
-                        if (debug) console.log(`      ❌ [DEBUG] Write failed: ${err.message}`);
-                        cleanup({
-                            success: false,
-                            error: `Write failed: ${err.message}`,
-                            duration: Date.now() - startTime
-                        });
-                    } else {
-                        if (debug) console.log(`      ✅ [DEBUG] Command sent`);
-                    }
-                });
-            });
-
-        } catch (error) {
-            if (debug) console.log(`      ❌ [DEBUG] Exception: ${error.message}`);
-            cleanup({
-                success: false,
-                error: `Exception: ${error.message}`,
-                duration: Date.now() - startTime
+            // Look for data sections
+            const remaining = response.slice(offset);
+            sections.push({
+                name: 'DATA',
+                start: offset,
+                end: response.length - 1,
+                value: remaining,
+                hex: remaining.toString('hex')
             });
         }
-    });
+        
+        analysis.interpretation.sections = sections;
+    }
+    
+    // Generate suggestions based on patterns
+    if (analysis.patterns.includes('SYNC_PATTERN_5555')) {
+        analysis.suggestions.push('This appears to be a Sony protocol with sync bytes');
+        analysis.suggestions.push('Try sending different command types to map the protocol');
+    }
+    
+    if (analysis.type === 'SIMPLE_STATUS') {
+        analysis.suggestions.push('Device responds with single-byte status');
+        analysis.suggestions.push('Try sending movement or query commands to get more data');
+    }
+    
+    if (response.length > 64) {
+        analysis.suggestions.push('Large response - may contain inventory or detailed status');
+        analysis.suggestions.push('Consider chunked parsing or different termination patterns');
+    }
+    
+    return analysis;
 }
 
 /**
- * Test multiple RS-422 configurations with improved cleanup and delays
+ * Send different command types to map the protocol
  * @param {string} path - Serial port path
  * @param {boolean} debug - Enable debug output
- * @returns {Promise<Object>} Test results with working configuration
+ * @returns {Promise<Object>} Command mapping results
  */
-async function testSerialConfigurations(path, debug = false) {
-    console.log(`🔧 Testing multiple RS-422 configurations on ${path}...`);
+async function mapFlexicartProtocol(path, debug = false) {
+    console.log(`🗺️ Mapping Flexicart protocol for ${path}...`);
     
-    // Check if port exists first
-    try {
-        const fs = require('fs');
-        if (!fs.existsSync(path)) {
-            console.log(`❌ Port ${path} does not exist`);
-            return null;
-        }
-        if (debug) console.log(`✅ [DEBUG] Port ${path} exists`);
-    } catch (fsError) {
-        console.log(`❌ Cannot check port existence: ${fsError.message}`);
-        return null;
-    }
-    
-    // Common RS-422 configurations for broadcast equipment
-    const configurations = [
-        { name: 'Sony Standard', baudRate: 38400, parity: 'even', dataBits: 8, stopBits: 1 },
-        { name: 'Sony Alternative', baudRate: 38400, parity: 'none', dataBits: 8, stopBits: 1 },
-        { name: 'Legacy Sony', baudRate: 9600, parity: 'even', dataBits: 8, stopBits: 1 },
-        { name: 'Legacy Sony Alt', baudRate: 9600, parity: 'none', dataBits: 8, stopBits: 1 },
-        { name: 'High Speed', baudRate: 115200, parity: 'even', dataBits: 8, stopBits: 1 },
-        { name: 'Standard RS-422', baudRate: 19200, parity: 'even', dataBits: 8, stopBits: 1 }
+    const testCommands = [
+        { name: 'STATUS', command: Buffer.from([0x02, 0x53, 0x03]) },           // STX S ETX
+        { name: 'POSITION', command: Buffer.from([0x02, 0x50, 0x03]) },         // STX P ETX
+        { name: 'VERSION', command: Buffer.from([0x02, 0x56, 0x03]) },          // STX V ETX
+        { name: 'INVENTORY', command: Buffer.from([0x02, 0x49, 0x03]) },        // STX I ETX
+        { name: 'ERROR_STATUS', command: Buffer.from([0x02, 0x45, 0x03]) },     // STX E ETX
+        { name: 'SIMPLE_STATUS', command: Buffer.from([0x53]) },                // S
+        { name: 'QUERY', command: Buffer.from([0x3F]) },                        // ?
+        { name: 'PING', command: Buffer.from([0x10]) },                         // DLE
+        { name: 'ENQ', command: Buffer.from([0x05]) },                          // ENQ
+        { name: 'RESET', command: Buffer.from([0x02, 0x52, 0x03]) }             // STX R ETX
     ];
     
-    const testResults = [];
+    const results = [];
     
-    for (let i = 0; i < configurations.length; i++) {
-        const config = configurations[i];
-        console.log(`\n🧪 Testing: ${config.name} (${config.baudRate} ${config.dataBits}${config.parity[0].toUpperCase()}${config.stopBits})`);
+    for (const testCmd of testCommands) {
+        console.log(`\n🧪 Testing command: ${testCmd.name}`);
+        console.log(`   Command bytes: ${testCmd.command.toString('hex')}`);
         
         try {
-            // Add extra delay before each test to ensure port is fully released
-            if (i > 0) {
-                if (debug) console.log(`   ⏳ [DEBUG] Waiting for port cleanup...`);
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
+            const response = await sendCommand(path, testCmd.command, 3000, debug);
+            const analysis = analyzeFlexicartResponse(response, path);
             
-            const result = await testSingleConfiguration(path, config, debug);
-            testResults.push({ ...config, ...result });
+            results.push({
+                command: testCmd.name,
+                commandBytes: testCmd.command.toString('hex'),
+                success: true,
+                response: response,
+                responseHex: response.toString('hex'),
+                responseLength: response.length,
+                analysis: analysis
+            });
             
-            if (result.success) {
-                console.log(`✅ SUCCESS with ${config.name}!`);
-                if (debug) {
-                    console.log(`   Response: ${result.response.toString('hex')}`);
-                    console.log(`   Duration: ${result.duration}ms`);
-                }
-                // Found working config, could return early
-                // But continue testing to see all working configs
-            } else {
-                console.log(`❌ Failed: ${result.error}`);
-            }
+            console.log(`   ✅ Response: ${response.length} bytes`);
+            console.log(`   📊 Type: ${analysis.type}`);
+            console.log(`   🔍 Patterns: ${analysis.patterns.join(', ') || 'None'}`);
             
         } catch (error) {
-            console.log(`❌ Error: ${error.message}`);
-            testResults.push({ 
-                ...config, 
-                success: false, 
-                error: error.message,
-                duration: 0
+            results.push({
+                command: testCmd.name,
+                commandBytes: testCmd.command.toString('hex'),
+                success: false,
+                error: error.message
             });
+            
+            console.log(`   ❌ Failed: ${error.message}`);
         }
         
-        // Extra delay between tests for port cleanup
-        if (debug) console.log(`   ⏳ [DEBUG] Post-test delay...`);
+        // Small delay between commands
         await new Promise(resolve => setTimeout(resolve, 500));
     }
     
-    const workingConfigs = testResults.filter(r => r.success);
+    // Analyze results
+    console.log('\n📊 Protocol Mapping Summary:');
+    console.log('============================');
     
-    console.log(`\n📊 Test Summary: ${workingConfigs.length}/${testResults.length} configurations successful`);
+    const successful = results.filter(r => r.success);
+    const failed = results.filter(r => !r.success);
     
-    if (workingConfigs.length > 0) {
-        console.log('\n✅ Working configurations:');
-        workingConfigs.forEach(config => {
-            console.log(`   ${config.name}: ${config.baudRate} ${config.dataBits}${config.parity[0].toUpperCase()}${config.stopBits} (${config.duration}ms)`);
+    console.log(`✅ Successful commands: ${successful.length}/${results.length}`);
+    console.log(`❌ Failed commands: ${failed.length}/${results.length}`);
+    
+    if (successful.length > 0) {
+        console.log('\n✅ Working commands:');
+        successful.forEach(result => {
+            console.log(`   ${result.command}: ${result.responseLength} bytes (${result.analysis.type})`);
         });
         
-        // Return the fastest working configuration
-        const fastest = workingConfigs.reduce((prev, current) => 
-            (prev.duration < current.duration) ? prev : current
+        // Find best commands for different purposes
+        const statusCommands = successful.filter(r => 
+            r.analysis.type === 'SIMPLE_STATUS' || 
+            r.command.includes('STATUS') ||
+            r.responseLength <= 4
         );
         
-        console.log(`\n🏆 Recommended: ${fastest.name} (fastest response: ${fastest.duration}ms)`);
-        return fastest;
-    } else {
-        console.log('\n❌ No working configurations found');
+        const dataCommands = successful.filter(r => 
+            r.analysis.type === 'STRUCTURED_RESPONSE' ||
+            r.responseLength > 10
+        );
         
-        // Analyze error patterns
-        const lockErrors = testResults.filter(r => r.error && r.error.includes('lock')).length;
-        const timeoutErrors = testResults.filter(r => r.error && r.error.includes('timeout')).length;
-        const permissionErrors = testResults.filter(r => r.error && r.error.includes('denied')).length;
-        
-        if (lockErrors > 0) {
-            console.log(`\n🔒 Found ${lockErrors} port locking issues`);
-            console.log('💡 Try these solutions:');
-            console.log('   1. Kill any processes using the port: sudo fuser -k ' + path);
-            console.log('   2. Check for stuck serial connections: sudo lsof | grep tty');
-            console.log('   3. Restart the service or reboot');
-            console.log('   4. Use a different port temporarily');
+        if (statusCommands.length > 0) {
+            console.log('\n📊 Best status commands:');
+            statusCommands.forEach(cmd => {
+                console.log(`   ${cmd.command}: ${cmd.commandBytes} → ${cmd.responseHex}`);
+            });
         }
         
-        if (permissionErrors > 0) {
-            console.log(`\n🚫 Found ${permissionErrors} permission issues`);
-            console.log('💡 Try: sudo chmod 666 ' + path);
-            console.log('💡 Or add user to dialout group: sudo usermod -a -G dialout $USER');
+        if (dataCommands.length > 0) {
+            console.log('\n📦 Best data commands:');
+            dataCommands.forEach(cmd => {
+                console.log(`   ${cmd.command}: ${cmd.commandBytes} → ${cmd.responseLength} bytes`);
+            });
         }
-        
-        if (timeoutErrors === testResults.length) {
-            console.log('\n⏰ All tests timed out - device may not be responding');
-            console.log('💡 Check:');
-            console.log('   - Device power');
-            console.log('   - Cable connections');
-            console.log('   - Correct port assignment');
-        }
-        
-        return null;
     }
+    
+    return results;
 }
 
 // Export the new testing function
@@ -1364,6 +1359,7 @@ module.exports = {
     FLEXICART_ERROR_CODES,
     FlexicartError,
     testSerialConfigurations,
-    testSingleConfiguration
+    testSingleConfiguration,
+    mapFlexicartProtocol
 };
 
