@@ -33,6 +33,13 @@ const {
     FlexicartError
 } = require('../src/commands/flexicart_interface');
 
+const {
+    getSonyDeviceInfo,
+    testSonyMovementCommands,
+    testSonyPositionMovement,
+    SONY_COMMANDS
+} = require('../src/commands/flexicart_sony_protocol');
+
 // Create local implementations of the missing functions:
 
 /**
@@ -602,12 +609,37 @@ async function testSonyCommands(flexicartPath) {
     try {
         await checkAndClearPortLocks(flexicartPath);
         
-        const results = await testSonyFlexicartCommands(flexicartPath, true);
+        // Get detailed device information using the new Sony module
+        const deviceInfo = await getSonyDeviceInfo(flexicartPath, true);
         
-        console.log(`\n📋 Sony command testing completed`);
-        return results;
+        if (deviceInfo.success) {
+            console.log('\n📋 Sony Device Information:');
+            console.log('============================');
+            
+            if (deviceInfo.deviceInfo.deviceType) {
+                console.log(`🏭 Device Type: ${deviceInfo.deviceInfo.deviceType.decoded}`);
+            }
+            
+            if (deviceInfo.deviceInfo.deviceId) {
+                console.log(`🆔 Device ID: ${deviceInfo.deviceInfo.deviceId.decoded}`);
+            }
+            
+            if (deviceInfo.deviceInfo.position) {
+                console.log(`📍 Current Position: ${deviceInfo.deviceInfo.position.decoded}`);
+            }
+            
+            if (deviceInfo.deviceInfo.status) {
+                console.log(`📊 Status: ${deviceInfo.deviceInfo.status.decoded}`);
+                console.log(`💡 Interpretation: ${deviceInfo.deviceInfo.status.interpretation}`);
+            }
+            
+            console.log(`🔧 Capabilities: ${deviceInfo.deviceInfo.capabilities.join(', ')}`);
+        }
+        
+        console.log(`\n📋 Sony device analysis completed`);
+        return deviceInfo;
     } catch (error) {
-        console.log(`❌ Sony command testing failed: ${error.message}`);
+        console.log(`❌ Sony device analysis failed: ${error.message}`);
         return null;
     }
 }
@@ -622,150 +654,112 @@ async function testSonyMovement(flexicartPath) {
     try {
         await checkAndClearPortLocks(flexicartPath);
         
-        const results = await testSonyFlexicartMovement(flexicartPath, true);
+        // Test general movement commands
+        const movementResults = await testSonyMovementCommands(flexicartPath, true);
+        
+        if (movementResults.success) {
+            console.log('\n📊 Sony Movement Test Summary:');
+            console.log('===============================');
+            console.log(`✅ Commands tested: ${movementResults.summary.successful}/${movementResults.summary.total}`);
+            console.log(`🏃 Commands causing movement: ${movementResults.summary.withMovement}`);
+            
+            if (movementResults.summary.withMovement > 0) {
+                console.log('\n🎯 Commands that caused position changes:');
+                movementResults.movementTests
+                    .filter(t => t.success && t.positionChanged)
+                    .forEach(test => {
+                        console.log(`   ✅ ${test.command}: ${test.description}`);
+                    });
+            }
+        }
+        
+        // Test specific position movement
+        console.log('\n📍 Testing specific position movement...');
+        const positionTest = await testSonyPositionMovement(flexicartPath, 1, true);
+        
+        if (positionTest.success) {
+            console.log('✅ Position movement test successful!');
+            console.log(`   Target: ${positionTest.targetPosition}, Final: ${positionTest.finalPosition}`);
+        } else {
+            console.log('❌ Position movement test failed');
+        }
         
         console.log(`\n📋 Sony movement testing completed`);
-        return results;
+        return { movementResults, positionTest };
     } catch (error) {
         console.log(`❌ Sony movement testing failed: ${error.message}`);
         return null;
     }
 }
 
-// Interactive Flexicart control
-async function controlFlexicart(path) {
-    console.log(`🎛️ Interactive Flexicart Control - ${path}`);
-    console.log('Type "help" for available commands, "quit" to exit');
+/**
+ * Add a new function for comprehensive Sony testing:
+ */
+async function comprehensiveSonyTest(flexicartPath) {
+    console.log(`\n🎌 Comprehensive Sony Flexicart Analysis`);
+    console.log(`=========================================`);
     
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        prompt: 'FLEXICART> '
-    });
-    
-    rl.prompt();
-    
-    rl.on('line', async (input) => {
-        const [command, ...args] = input.trim().toLowerCase().split(' ');
+    try {
+        await checkAndClearPortLocks(flexicartPath);
         
-        try {
-            switch (command) {
-                case 'status':
-                    await checkSingleFlexicart(path);
-                    break;
-                    
-                case 'home':
-                    const homeResult = await sendFlexicartCommand(path, FLEXICART_COMMANDS.MOVE_HOME, 'MOVE_HOME');
-                    console.log(homeResult.success ? '✅ Home command sent' : '❌ Home command failed');
-                    break;
-                    
-                case 'move':
-                    const position = parseInt(args[0]);
-                    if (isNaN(position)) {
-                        console.log('❌ Usage: move <position_number>');
-                    } else {
-                        const moveResult = await moveFlexicartToPosition(path, position);
-                        console.log(moveResult.success ? `✅ Moving to position ${position}` : '❌ Move command failed');
-                    }
-                    break;
-                    
-                case 'stop':
-                    const stopResult = await emergencyStopFlexicart(path);
-                    console.log(stopResult.success ? '✅ Emergency stop sent' : '❌ Stop command failed');
-                    break;
-                    
-                case 'inventory':
-                    const inventoryResult = await getFlexicartInventory(path);
-                    if (inventoryResult.success) {
-                        const inv = inventoryResult.inventory;
-                        console.log(`📦 Inventory: ${inv.occupied.length}/${inv.total} slots occupied`);
-                        console.log(`   Occupied slots: ${inv.occupied.join(', ')}`);
-                        console.log(`   Empty slots: ${inv.empty.join(', ')}`);
-                    } else {
-                        console.log('❌ Failed to get inventory');
-                    }
-                    break;
-                    
-                case 'test-movement':
-                    await testFlexicartMovementLocal(path);
-                    break;
-                    
-                case 'errors':
-                    const errorResult = await getFlexicartErrors(path);
-                    if (errorResult.success) {
-                        if (errorResult.errors.length === 0) {
-                            console.log('✅ No errors reported');
-                        } else {
-                            console.log(`⚠️  ${errorResult.errors.length} error(s) found:`);
-                            errorResult.errors.forEach((error, index) => {
-                                console.log(`   ${index + 1}. [${error.code}] ${error.description}`);
-                            });
-                        }
-                    } else {
-                        console.log('❌ Failed to get error status');
-                    }
-                    break;
-                    
-                case 'clear-errors':
-                    const clearResult = await clearFlexicartErrors(path);
-                    console.log(clearResult.success ? '✅ Errors cleared' : '❌ Failed to clear errors');
-                    break;
-                    
-                case 'calibrate':
-                    console.log('⚙️ Starting calibration (this may take a while)...');
-                    const calResult = await calibrateFlexicart(path);
-                    console.log(calResult.success ? '✅ Calibration completed' : '❌ Calibration failed');
-                    break;
-                    
-                case 'position':
-                    const posResult = await getFlexicartPosition(path);
-                    if (posResult.success) {
-                        const pos = posResult.position;
-                        console.log(`📍 Current position: ${pos.current}/${pos.total}`);
-                        console.log(`   Moving: ${pos.moving ? 'YES' : 'NO'}`);
-                    } else {
-                        console.log('❌ Failed to get position');
-                    }
-                    break;
-                    
-                case 'help':
-                    console.log('\n📋 Available Commands:');
-                    console.log('  status         - Check Flexicart status');
-                    console.log('  position       - Get current position');
-                    console.log('  home           - Move to home position');
-                    console.log('  move <pos>     - Move to specific position');
-                    console.log('  stop           - Emergency stop');
-                    console.log('  inventory      - Get cartridge inventory');
-                    console.log('  test-movement  - Test movement capabilities');
-                    console.log('  errors         - Check error status');
-                    console.log('  clear-errors   - Clear all errors');
-                    console.log('  calibrate      - Calibrate positioning system');
-                    console.log('  quit           - Exit control mode');
-                    break;
-                    
-                case 'quit':
-                case 'exit':
-                    console.log('👋 Goodbye!');
-                    rl.close();
-                    return;
-                    
-                default:
-                    console.log('❌ Unknown command. Type "help" for available commands.');
+        // Step 1: Device identification
+        console.log('\n📋 Step 1: Device Identification');
+        const deviceInfo = await getSonyDeviceInfo(flexicartPath, true);
+        
+        // Step 2: Movement capability testing
+        console.log('\n🏃 Step 2: Movement Capability Testing');
+        const movementResults = await testSonyMovementCommands(flexicartPath, true);
+        
+        // Step 3: Position control testing
+        console.log('\n📍 Step 3: Position Control Testing');
+        const positions = [1, 2, 3]; // Test first few positions
+        const positionResults = [];
+        
+        for (const pos of positions) {
+            console.log(`\n   Testing position ${pos}...`);
+            const result = await testSonyPositionMovement(flexicartPath, pos, true);
+            positionResults.push(result);
+            
+            if (result.success) {
+                console.log(`   ✅ Position ${pos}: SUCCESS`);
+            } else {
+                console.log(`   ❌ Position ${pos}: FAILED`);
             }
-        } catch (error) {
-            console.log(`❌ Error: ${error.message}`);
+            
+            // Wait between position tests
+            await new Promise(resolve => setTimeout(resolve, 2000));
         }
         
-        rl.prompt();
-    });
-    
-    rl.on('close', () => {
-        console.log('\n👋 Flexicart control session ended');
-        process.exit(0);
-    });
+        // Summary
+        console.log('\n📊 Comprehensive Test Summary:');
+        console.log('===============================');
+        console.log(`🆔 Device identified: ${deviceInfo.success ? 'YES' : 'NO'}`);
+        console.log(`🏃 Movement capable: ${movementResults.success && movementResults.summary.withMovement > 0 ? 'YES' : 'NO'}`);
+        console.log(`📍 Position control: ${positionResults.filter(r => r.success).length}/${positionResults.length} positions`);
+        
+        if (deviceInfo.success && deviceInfo.deviceInfo.capabilities) {
+            console.log(`🔧 Capabilities: ${deviceInfo.deviceInfo.capabilities.join(', ')}`);
+        }
+        
+        return {
+            deviceInfo,
+            movementResults,
+            positionResults,
+            overall: {
+                deviceIdentified: deviceInfo.success,
+                movementCapable: movementResults.success && movementResults.summary.withMovement > 0,
+                positionControl: positionResults.filter(r => r.success).length,
+                totalPositionsTested: positionResults.length
+            }
+        };
+        
+    } catch (error) {
+        console.log(`❌ Comprehensive test failed: ${error.message}`);
+        return { error: error.message };
+    }
 }
 
-// Main execution
+// Update the main function to include the comprehensive test:
 async function main() {
     const args = process.argv.slice(2);
     
@@ -863,6 +857,14 @@ async function main() {
                     return;
                 }
                 await testSonyMovement(flexicartPath);
+                break;
+                
+            case '--comprehensive-sony':
+                if (!flexicartPath) {
+                    console.log('❌ Error: Port path required');
+                    return;
+                }
+                await comprehensiveSonyTest(flexicartPath);
                 break;
                 
             default:
