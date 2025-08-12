@@ -3,7 +3,8 @@
  * Handles all movement and positioning operations for Flexicart devices
  */
 
-const { sendCommand } = require('./flexicart_interface');
+// Import from the new serial utils module
+const { sendCommand } = require('./flexicart_serial_utils');
 const { parseFlexicartStatus, parseFlexicartPosition, parseFlexicartMoveResponse } = require('./flexicart_status_parser');
 
 /**

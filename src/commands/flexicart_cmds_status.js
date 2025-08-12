@@ -3,7 +3,8 @@
  * Handles all status-related operations for Flexicart devices
  */
 
-const { sendCommand } = require('./flexicart_interface');
+// Import from the new serial utils module
+const { sendCommand } = require('./flexicart_serial_utils');
 const { parseFlexicartStatus } = require('./flexicart_status_parser');
 
 /**

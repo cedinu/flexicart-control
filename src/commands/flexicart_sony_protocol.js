@@ -3,7 +3,8 @@
  * Specialized module for Sony VTR-style Flexicart communication
  */
 
-const { sendCommand } = require('./flexicart_interface');
+// Import from the new serial utils module instead of main interface
+const { sendCommand } = require('./flexicart_serial_utils');
 
 /**
  * Sony VTR Command Constants
