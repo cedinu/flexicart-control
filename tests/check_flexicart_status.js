@@ -3,25 +3,34 @@ const readline = require('readline');
 
 // Import Flexicart-specific functions
 const {
+    // Status functions
     autoScanFlexicarts,
     getFlexicartStatus,
-    sendFlexicartCommand,
-    establishFlexicartControl,
-    testFlexicartCommunication,
     getFlexicartPosition,
-    moveFlexicartToPosition,
     getFlexicartInventory,
-    testFlexicartMovement,
-    calibrateFlexicart,
-    emergencyStopFlexicart,
     getFlexicartErrors,
     clearFlexicartErrors,
+    testFlexicartCommunication,
+    
+    // Transport functions
+    sendFlexicartCommand,
+    moveFlexicartHome: moveFlexicartToPosition,  // Alias for compatibility
+    emergencyStopFlexicart,
+    calibrateFlexicart,
+    establishFlexicartControl,
+    testFlexicartMovement,
+    
+    // Parsing functions
     parseFlexicartStatus,
     parseFlexicartPosition,
     parseFlexicartInventory,
+    
+    // Core utilities
+    sendCommand,
+    
+    // Constants
     FLEXICART_COMMANDS,
-    FlexicartError,
-    sendCommand  // Import the base sendCommand function
+    FlexicartError
 } = require('../src/commands/flexicart_interface');
 
 // Create local implementations of the missing functions:
