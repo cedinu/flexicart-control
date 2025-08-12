@@ -167,15 +167,24 @@ class FlexiCartSerialDiagnostic {
     }
 
     /**
-     * Check basic port accessibility
+     * Check basic port accessibility - modified to handle custom devices
      */
     static async checkPortAccess(portPath) {
         console.log(`🔍 Checking port accessibility: ${portPath}`);
         
         try {
-            // List available ports
+            // Check if port exists in filesystem
+            const fs = require('fs');
+            if (!fs.existsSync(portPath)) {
+                console.log(`❌ Port ${portPath} does not exist in filesystem`);
+                return false;
+            }
+            
+            console.log(`✅ Port ${portPath} exists in filesystem`);
+            
+            // List available ports (for reference)
             const ports = await SerialPort.list();
-            console.log(`📋 Available serial ports:`);
+            console.log(`📋 Available serial ports (${ports.length} found):`);
             
             let targetPortFound = false;
             ports.forEach(port => {
@@ -186,15 +195,47 @@ class FlexiCartSerialDiagnostic {
             });
 
             if (!targetPortFound) {
-                console.log(`❌ Target port ${portPath} not found in system!`);
-                return false;
+                console.log(`⚠️  Target port ${portPath} not found in system enumeration`);
+                console.log(`   This is common for custom device drivers (like ttyRP*)`);
+                console.log(`   Will attempt direct connection...`);
+            } else {
+                console.log(`✅ Target port ${portPath} found in system enumeration`);
             }
 
-            console.log(`✅ Target port ${portPath} found in system`);
-            return true;
+            // Test direct port access
+            console.log(`🔧 Testing direct port access...`);
+            
+            return new Promise((resolve) => {
+                const testPort = new SerialPort({
+                    path: portPath,
+                    baudRate: 9600,
+                    dataBits: 8,
+                    parity: 'none',
+                    stopBits: 1,
+                    autoOpen: false
+                });
+
+                testPort.open((err) => {
+                    if (err) {
+                        console.log(`❌ Direct access failed: ${err.message}`);
+                        resolve(false);
+                    } else {
+                        console.log(`✅ Direct access successful!`);
+                        testPort.close(() => {
+                            resolve(true);
+                        });
+                    }
+                });
+
+                // Timeout for the test
+                setTimeout(() => {
+                    console.log(`⏰ Direct access test timeout`);
+                    resolve(false);
+                }, 3000);
+            });
 
         } catch (error) {
-            console.log(`❌ Port enumeration failed: ${error.message}`);
+            console.log(`❌ Port access check failed: ${error.message}`);
             return false;
         }
     }
@@ -361,8 +402,16 @@ async function main() {
             console.log(`\n❌ DIAGNOSTIC FAILED - ${result.reason}`);
             process.exit(1);
         }
-        
     } catch (error) {
+
+
+
+
+
+
+
+
+main();// Execute main function}    }        process.exit(1);        console.log(`\n❌ Unexpected error during diagnostics: ${error.message}`);    } catch (error) {
         console.error(`💥 Diagnostic crashed: ${error.message}`);
         console.error(error.stack);
         process.exit(1);
