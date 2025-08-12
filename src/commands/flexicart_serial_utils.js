@@ -71,20 +71,20 @@ async function sendCommand(path, command, timeout = 3000, debug = false) {
         try {
             if (debug) console.log(`    🔌 [DEBUG] Opening RS-422 port ${path}...`);
             
-            // RS-422 configuration for Sony Flexicart
+            // RS-422 configuration for Sony Flexicart - WORKING CONFIG
             port = new SerialPort({
                 path: path,
-                baudRate: 38400,        
+                baudRate: 19200,        // Changed from 38400 to 19200 (discovered working)
                 dataBits: 8,           
                 parity: 'even',        
                 stopBits: 1,           
                 flowControl: false,    
                 autoOpen: false,
-                lock: false  // Disable port locking
+                lock: false
             });
 
             if (debug) {
-                console.log(`    📡 [DEBUG] RS-422 Settings: 38400 baud, 8E1, no flow control, no locking`);
+                console.log(`    📡 [DEBUG] RS-422 Settings: 19200 baud, 8E1, no flow control (WORKING CONFIG)`);
             }
 
             // Set open timeout
