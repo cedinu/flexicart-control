@@ -75,21 +75,43 @@ class FlexiCartStatusFixed {
      * Send command using correct FlexiCart settings (38400 8E1)
      */
     static async sendCommand(portPath, command, timeout = 4000, debug = false) {
+        // Add aggressive port cleanup before opening
+        try {
+            const { execSync } = require('child_process');
+            execSync(`sudo fuser -k ${portPath}`, { stdio: 'ignore' });
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (e) {
+            // Ignore cleanup errors
+        }
+
         return new Promise((resolve) => {
             if (debug) console.log(`📤 Sending: ${command.toString('hex').toUpperCase()}`);
             
             let port;
             let responseBuffer = Buffer.alloc(0);
             let resolved = false;
+            let timeoutHandle;
 
             const cleanup = (result) => {
                 if (resolved) return;
                 resolved = true;
                 
-                if (port && port.isOpen) {
-                    port.close(() => {
+                if (timeoutHandle) clearTimeout(timeoutHandle);
+                
+                if (port) {
+                    try {
+                        port.removeAllListeners();
+                        if (port.isOpen) {
+                            port.close(() => {
+                                // Force additional cleanup
+                                setTimeout(() => resolve(result), 500);
+                            });
+                        } else {
+                            resolve(result);
+                        }
+                    } catch (e) {
                         resolve(result);
-                    });
+                    }
                 } else {
                     resolve(result);
                 }
@@ -102,7 +124,8 @@ class FlexiCartStatusFixed {
                     dataBits: 8,
                     parity: 'even',
                     stopBits: 1,
-                    autoOpen: false
+                    autoOpen: false,
+                    lock: false             // Disable locking
                 });
 
                 port.on('data', (data) => {
@@ -123,6 +146,18 @@ class FlexiCartStatusFixed {
 
                     if (debug) console.log(`✅ Port opened (38400 8E1)`);
 
+                    // Set response timeout
+                    timeoutHandle = setTimeout(() => {
+                        if (debug) console.log(`📊 Response: ${responseBuffer.length} bytes`);
+                        
+                        cleanup({
+                            success: responseBuffer.length > 0,
+                            response: responseBuffer,
+                            hex: responseBuffer.toString('hex').toUpperCase(),
+                            length: responseBuffer.length
+                        });
+                    }, timeout);
+
                     port.write(command, (writeErr) => {
                         if (writeErr) {
                             cleanup({ success: false, error: writeErr.message });
@@ -130,17 +165,6 @@ class FlexiCartStatusFixed {
                         }
 
                         if (debug) console.log(`✅ Command sent`);
-
-                        setTimeout(() => {
-                            if (debug) console.log(`📊 Response: ${responseBuffer.length} bytes`);
-                            
-                            cleanup({
-                                success: responseBuffer.length > 0,
-                                response: responseBuffer,
-                                hex: responseBuffer.toString('hex').toUpperCase(),
-                                length: responseBuffer.length
-                            });
-                        }, timeout);
                     });
                 });
 
@@ -241,7 +265,9 @@ class FlexiCartStatusFixed {
                 console.log(`   ❌ Error: ${error.message}`);
             }
             
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Longer delay between commands
+            console.log(`   ⏳ Waiting 3 seconds for port cleanup...`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
         }
     }
 
