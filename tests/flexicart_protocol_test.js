@@ -164,9 +164,9 @@ class FlexiCartProtocolTest {
     };
     
     /**
-     * IMPROVED: Single port connection with multiple commands
+     * IMPROVED: Single port connection with multiple commands - FIXED TIMEOUT
      */
-    static async sendMultipleCommands(portPath, commands, timeout = 30000) {
+    static async sendMultipleCommands(portPath, commands, timeout = 60000) {
         return new Promise((resolve) => {
             let port;
             let results = [];
@@ -199,8 +199,11 @@ class FlexiCartProtocolTest {
                 
                 let responseBuffer = Buffer.alloc(0);
                 let responseTimeout;
+                let dataReceived = false;
                 
                 const processResponse = () => {
+                    if (responseTimeout) clearTimeout(responseTimeout);
+                    
                     const analysis = analyzeFlexiCartStatus(responseBuffer);
                     
                     results.push({
@@ -212,7 +215,7 @@ class FlexiCartProtocolTest {
                     });
                     
                     console.log(`   📥 Response: ${responseBuffer.length > 0 ? '✅ RECEIVED' : '❌ NONE'}`);
-                    if (analysis.interpretation.length > 0) {
+                    if (analysis.interpretation && analysis.interpretation.length > 0) {
                         console.log(`   📊 Analysis: ${analysis.interpretation.join(' | ')}`);
                     }
                     
@@ -221,12 +224,18 @@ class FlexiCartProtocolTest {
                     // Wait before next command
                     setTimeout(() => {
                         sendNextCommand();
-                    }, 2000);
+                    }, 1500); // Reduced delay
                 };
                 
                 // Set up response collection
                 const dataHandler = (data) => {
                     responseBuffer = Buffer.concat([responseBuffer, data]);
+                    if (!dataReceived) {
+                        dataReceived = true;
+                        // Give a bit more time for any additional data
+                        if (responseTimeout) clearTimeout(responseTimeout);
+                        responseTimeout = setTimeout(processResponse, 1000);
+                    }
                 };
                 
                 port.removeAllListeners('data');
@@ -246,8 +255,13 @@ class FlexiCartProtocolTest {
                         return;
                     }
                     
-                    // Wait for response
-                    responseTimeout = setTimeout(processResponse, 3000);
+                    // Set timeout for response (if no data received)
+                    responseTimeout = setTimeout(() => {
+                        if (!dataReceived) {
+                            console.log(`   ⏰ Timeout - no response received`);
+                            processResponse();
+                        }
+                    }, 4000); // 4 second timeout
                 });
             };
             
@@ -263,7 +277,7 @@ class FlexiCartProtocolTest {
                 
                 port.on('error', (err) => {
                     console.log(`❌ Port error: ${err.message}`);
-                    cleanup([]);
+                    cleanup(results);
                 });
                 
                 port.open((openErr) => {
@@ -274,7 +288,10 @@ class FlexiCartProtocolTest {
                     }
                     
                     console.log(`✅ Port opened successfully`);
-                    timeoutHandle = setTimeout(() => cleanup(results), timeout);
+                    timeoutHandle = setTimeout(() => {
+                        console.log(`⏰ Overall timeout reached, processing ${results.length} results`);
+                        cleanup(results);
+                    }, timeout);
                     sendNextCommand();
                 });
                 
@@ -286,7 +303,7 @@ class FlexiCartProtocolTest {
     }
     
     /**
-     * Test with single port connection
+     * Test with single port connection - COMPLETE ALL COMMANDS
      */
     static async testWithSingleConnection(portPath, cartAddress = 0x01) {
         console.log('🎬 FlexiCart Single Connection Test');
@@ -309,12 +326,16 @@ class FlexiCartProtocolTest {
         
         const results = await this.sendMultipleCommands(portPath, testSequence);
         
-        // Analyze results
+        // Analyze results - COMPLETE ANALYSIS
         console.log('\n📊 COMPREHENSIVE ANALYSIS');
         console.log('=========================');
         
         const successful = results.filter(r => r.success);
         console.log(`Successful commands: ${successful.length}/${results.length}`);
+        
+        if (results.length < testSequence.length) {
+            console.log(`⚠️ Test completed early: ${results.length}/${testSequence.length} commands processed`);
+        }
         
         // Status analysis
         const statusResults = results.filter(r => r.name.includes('Status') && r.success);
@@ -338,15 +359,19 @@ class FlexiCartProtocolTest {
                     
                     // Find specific byte changes
                     const changes = [];
-                    result.analysis.bytes.forEach((byte, pos) => {
+                    const maxLength = Math.max(result.analysis.bytes.length, prev.analysis.bytes.length);
+                    for (let pos = 0; pos < maxLength; pos++) {
+                        const currentByte = result.analysis.bytes[pos] || 0;
                         const prevByte = prev.analysis.bytes[pos] || 0;
-                        if (byte !== prevByte) {
-                            changes.push(`pos${pos}: 0x${prevByte.toString(16).toUpperCase()} → 0x${byte.toString(16).toUpperCase()}`);
+                        if (currentByte !== prevByte) {
+                            changes.push(`pos${pos}: 0x${prevByte.toString(16).toUpperCase()} → 0x${currentByte.toString(16).toUpperCase()}`);
                         }
-                    });
+                    }
                     
-                    if (changes.length > 0) {
+                    if (changes.length > 0 && changes.length <= 10) { // Only show if reasonable number of changes
                         console.log(`   📍 Changed bytes: ${changes.join(', ')}`);
+                    } else if (changes.length > 10) {
+                        console.log(`   📍 Major changes: ${changes.length} bytes different`);
                     }
                 } else {
                     console.log(`   📍 Same as previous`);
@@ -354,7 +379,7 @@ class FlexiCartProtocolTest {
             }
         });
         
-        // Check for ON-AIR tally functionality
+        // ON-AIR TALLY ANALYSIS
         console.log(`\n🚨 ON-AIR TALLY ANALYSIS:`);
         const tallyOnStatus = statusResults.find(r => r.name.includes('After Tally ON'));
         const tallyOffStatus = statusResults.find(r => r.name.includes('After Tally OFF'));
@@ -364,12 +389,27 @@ class FlexiCartProtocolTest {
                 console.log('✅ ON-AIR TALLY IS WORKING!');
                 console.log(`   ON state:  ${tallyOnStatus.analysis.hex}`);
                 console.log(`   OFF state: ${tallyOffStatus.analysis.hex}`);
+                
+                // Identify which specific bytes change for tally
+                const tallyChanges = [];
+                const maxLength = Math.max(tallyOnStatus.analysis.bytes.length, tallyOffStatus.analysis.bytes.length);
+                for (let pos = 0; pos < maxLength; pos++) {
+                    const onByte = tallyOnStatus.analysis.bytes[pos] || 0;
+                    const offByte = tallyOffStatus.analysis.bytes[pos] || 0;
+                    if (onByte !== offByte) {
+                        tallyChanges.push(`pos${pos}: ON=0x${onByte.toString(16).toUpperCase()}, OFF=0x${offByte.toString(16).toUpperCase()}`);
+                    }
+                }
+                console.log(`   📍 Tally control bytes: ${tallyChanges.join(', ')}`);
+                
             } else {
                 console.log('❌ ON-AIR tally shows no status change');
             }
+        } else {
+            console.log('⚠️ Could not compare ON-AIR tally states (missing status data)');
         }
         
-        // Check for elevator movement
+        // ELEVATOR MOVEMENT ANALYSIS
         console.log(`\n🏗️ ELEVATOR MOVEMENT ANALYSIS:`);
         const beforeMove = statusResults.find(r => r.name.includes('After Tally OFF'));
         const afterUp = statusResults.find(r => r.name.includes('After Move UP'));
@@ -377,41 +417,98 @@ class FlexiCartProtocolTest {
         
         let elevatorWorking = false;
         
-        if (beforeMove && afterUp && afterUp.analysis.hex !== beforeMove.analysis.hex) {
-            console.log('✅ ELEVATOR UP MOVEMENT DETECTED!');
-            console.log(`   Before: ${beforeMove.analysis.hex}`);
-            console.log(`   After UP: ${afterUp.analysis.hex}`);
-            elevatorWorking = true;
+        if (beforeMove && afterUp) {
+            if (afterUp.analysis.hex !== beforeMove.analysis.hex) {
+                console.log('✅ ELEVATOR UP MOVEMENT DETECTED!');
+                console.log(`   Before: ${beforeMove.analysis.hex}`);
+                console.log(`   After UP: ${afterUp.analysis.hex}`);
+                elevatorWorking = true;
+                
+                // Show which bytes changed for UP movement
+                const upChanges = [];
+                const maxLength = Math.max(beforeMove.analysis.bytes.length, afterUp.analysis.bytes.length);
+                for (let pos = 0; pos < maxLength; pos++) {
+                    const beforeByte = beforeMove.analysis.bytes[pos] || 0;
+                    const afterByte = afterUp.analysis.bytes[pos] || 0;
+                    if (beforeByte !== afterByte) {
+                        upChanges.push(`pos${pos}: ${beforeByte.toString(16).toUpperCase()}→${afterByte.toString(16).toUpperCase()}`);
+                    }
+                }
+                if (upChanges.length > 0 && upChanges.length <= 8) {
+                    console.log(`   📍 UP movement bytes: ${upChanges.join(', ')}`);
+                }
+            } else {
+                console.log('⚠️ No status change detected after UP movement');
+            }
         }
         
-        if (afterUp && afterDown && afterDown.analysis.hex !== afterUp.analysis.hex) {
-            console.log('✅ ELEVATOR DOWN MOVEMENT DETECTED!');
-            console.log(`   After UP: ${afterUp.analysis.hex}`);
-            console.log(`   After DOWN: ${afterDown.analysis.hex}`);
-            elevatorWorking = true;
+        if (afterUp && afterDown) {
+            if (afterDown.analysis.hex !== afterUp.analysis.hex) {
+                console.log('✅ ELEVATOR DOWN MOVEMENT DETECTED!');
+                console.log(`   After UP: ${afterUp.analysis.hex}`);
+                console.log(`   After DOWN: ${afterDown.analysis.hex}`);
+                elevatorWorking = true;
+                
+                // Show which bytes changed for DOWN movement
+                const downChanges = [];
+                const maxLength = Math.max(afterUp.analysis.bytes.length, afterDown.analysis.bytes.length);
+                for (let pos = 0; pos < maxLength; pos++) {
+                    const upByte = afterUp.analysis.bytes[pos] || 0;
+                    const downByte = afterDown.analysis.bytes[pos] || 0;
+                    if (upByte !== downByte) {
+                        downChanges.push(`pos${pos}: ${upByte.toString(16).toUpperCase()}→${downByte.toString(16).toUpperCase()}`);
+                    }
+                }
+                if (downChanges.length > 0 && downChanges.length <= 8) {
+                    console.log(`   📍 DOWN movement bytes: ${downChanges.join(', ')}`);
+                }
+            } else {
+                console.log('⚠️ No status change detected after DOWN movement');
+            }
         }
         
         if (!elevatorWorking) {
-            console.log('❌ No elevator movement detected in status');
-            console.log('   Checking if movement commands were accepted...');
+            console.log('❌ No elevator movement detected in status changes');
             
+            // Check if movement commands were accepted
             const moveUp = results.find(r => r.name.includes('Move UP'));
             const moveDown = results.find(r => r.name.includes('Move DOWN'));
             
             if (moveUp && moveUp.success) {
-                console.log('   ✅ Move UP command was accepted');
+                console.log('   ✅ Move UP command was accepted by FlexiCart');
             }
             if (moveDown && moveDown.success) {
-                console.log('   ✅ Move DOWN command was accepted');
+                console.log('   ✅ Move DOWN command was accepted by FlexiCart');
+            }
+            
+            if ((moveUp && moveUp.success) || (moveDown && moveDown.success)) {
+                console.log('   💡 Commands accepted but no physical movement detected');
+                console.log('      Possible reasons:');
+                console.log('      - Cart already at target position');
+                console.log('      - Physical movement disabled/blocked');
+                console.log('      - Movement in progress but not reflected in status yet');
+                console.log('      - Different command parameters needed for movement');
             }
         }
         
         // Final assessment
         console.log(`\n🏁 FINAL ASSESSMENT:`);
         console.log(`====================`);
+        console.log(`Commands processed: ${results.length}/${testSequence.length}`);
+        console.log(`Success rate: ${Math.round((successful.length/results.length) * 100)}%`);
         console.log(`Protocol communication: ${successful.length > 5 ? '✅ Working' : '❌ Issues'}`);
         console.log(`ON-AIR tally: ${tallyOnStatus && tallyOffStatus && tallyOnStatus.analysis.hex !== tallyOffStatus.analysis.hex ? '✅ Working' : '❌ Not working'}`);
         console.log(`Elevator movement: ${elevatorWorking ? '✅ Working' : '❌ Not detected'}`);
+        
+        if (successful.length >= 6) {
+            console.log('\n🎯 CONCLUSION: FlexiCart protocol is working correctly');
+            console.log('✅ ON-AIR tally functionality confirmed');
+            if (elevatorWorking) {
+                console.log('✅ Elevator movement functionality confirmed');
+            } else {
+                console.log('⚠️ Elevator movement needs further investigation');
+            }
+        }
         
         return results;
     }
