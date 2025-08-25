@@ -9,6 +9,13 @@ FlexiCart Control is a Node.js-based RS-422 serial communication service for con
 
 The system provides HTTP/HTTPS REST APIs and WebSocket connectivity for real-time device control and status monitoring.
 
+### FlexiCart System Specifications
+- **Capacity**: Up to 360 cartridges in automated carousel system
+- **Cart Types**: Supports various NAB cartridge formats (A, B, C sizes)
+- **Control Interface**: Sony RS-422 compatible protocol
+- **Response System**: Immediate ACK/NACK responses with separate status interrogation required
+- **Multi-Unit Support**: Daisy-chain up to 8 units on single RS-422 port
+
 ## Architecture Overview
 
 ```
@@ -62,18 +69,87 @@ const FLEXICART_COMMAND = {
 };
 ```
 
-### Validated FlexiCart Commands
+### FlexiCart Command Categories
+
+#### 1. Immediate Response Commands (Direct Status)
+Commands that return immediate status information without ACK/NACK:
 ```javascript
-// ON-AIR Tally Control (CONFIRMED WORKING)
-ON_AIR_TALLY_ON:  { cmd: 0x71, ctrl: 0x01, data: 0x80 }   // Turn ON-AIR tally ON
-ON_AIR_TALLY_OFF: { cmd: 0x71, ctrl: 0x00, data: 0x80 }   // Turn ON-AIR tally OFF
+STATUS_REQUEST:    { cmd: 0x61, ctrl: 0x10, data: 0x80 }   // Get device status
+POSITION_REQUEST:  { cmd: 0x61, ctrl: 0x20, data: 0x80 }   // Get current position
+INVENTORY_REQUEST: { cmd: 0x61, ctrl: 0x30, data: 0x80 }   // Get cart inventory
+ERROR_STATUS:      { cmd: 0x61, ctrl: 0x40, data: 0x80 }   // Get error conditions
+```
 
-// Elevator Movement Commands (PROTOCOL ACCEPTED)  
-ELEVATOR_UP:      { cmd: 0x41, ctrl: 0x01, data: 0x80 }   // Move elevator up
-ELEVATOR_DOWN:    { cmd: 0x41, ctrl: 0x02, data: 0x80 }   // Move elevator down
+#### 2. Macro Commands (ACK/NACK + Status Interrogation Required)
+Commands that return ACK (0x10) or NACK (0x11), requiring separate status checks:
 
-// Status Commands
-STATUS_REQUEST:   { cmd: 0x61, ctrl: 0x10, data: 0x80 }   // Get device status
+```javascript
+// Movement Commands - Return ACK/NACK immediately, status via interrogation
+ELEVATOR_UP:       { cmd: 0x41, ctrl: 0x01, data: 0x80 }   // Move elevator up
+ELEVATOR_DOWN:     { cmd: 0x41, ctrl: 0x02, data: 0x80 }   // Move elevator down
+CAROUSEL_CW:       { cmd: 0x42, ctrl: 0x01, data: 0x80 }   // Rotate carousel clockwise
+CAROUSEL_CCW:      { cmd: 0x42, ctrl: 0x02, data: 0x80 }   // Rotate carousel counter-clockwise
+MOVE_TO_POSITION:  { cmd: 0x43, ctrl: pos, data: 0x80 }    // Move to specific cart position
+
+// Cart Operations - Return ACK/NACK immediately, completion via interrogation  
+LOAD_CART:         { cmd: 0x44, ctrl: 0x01, data: 0x80 }   // Load cart into player
+UNLOAD_CART:       { cmd: 0x44, ctrl: 0x02, data: 0x80 }   // Unload cart from player
+EJECT_CART:        { cmd: 0x45, ctrl: 0x01, data: 0x80 }   // Eject cart to access bay
+
+// System Commands - Return ACK/NACK immediately
+INITIALIZE:        { cmd: 0x46, ctrl: 0x01, data: 0x80 }   // Initialize system
+CALIBRATE:         { cmd: 0x47, ctrl: 0x01, data: 0x80 }   // Calibrate positions
+EMERGENCY_STOP:    { cmd: 0x48, ctrl: 0x01, data: 0x80 }   // Emergency stop all motion
+```
+
+#### 3. Control Commands (Immediate Effect)
+Commands that execute immediately and return confirmation:
+```javascript
+// Confirmed working - immediate status change
+ON_AIR_TALLY_ON:   { cmd: 0x71, ctrl: 0x01, data: 0x80 }   // Turn ON-AIR tally ON
+ON_AIR_TALLY_OFF:  { cmd: 0x71, ctrl: 0x00, data: 0x80 }   // Turn ON-AIR tally OFF
+
+// Audio/Transport Control - immediate effect
+PLAY_COMMAND:      { cmd: 0x50, ctrl: 0x01, data: 0x80 }   // Start cart playback
+STOP_COMMAND:      { cmd: 0x50, ctrl: 0x00, data: 0x80 }   // Stop cart playback
+PAUSE_COMMAND:     { cmd: 0x50, ctrl: 0x02, data: 0x80 }   // Pause cart playback
+```
+
+### Macro Command Response Protocol
+
+**CRITICAL CONCEPT**: FlexiCart uses a two-stage command system for complex operations:
+
+1. **Initial Response**: ACK (0x10) = Command accepted, NACK (0x11) = Command rejected
+2. **Status Interrogation**: Separate status requests needed to determine completion
+
+```javascript
+// Example: Moving elevator UP
+async function moveElevatorUp(port, cartAddress = 0x01) {
+    // Step 1: Send movement command
+    const moveCommand = createFlexiCartCommand(0x41, 0x01, 0x80, cartAddress);
+    const initialResponse = await sendCommand(port, moveCommand);
+    
+    // Step 2: Check initial ACK/NACK
+    if (initialResponse[0] === 0x10) {
+        console.log("Command accepted - movement initiated");
+        
+        // Step 3: Poll status until movement complete
+        let attempts = 0;
+        while (attempts < 50) { // Max 5 seconds at 100ms intervals
+            await delay(100);
+            const statusResponse = await getMovementStatus(port, cartAddress);
+            
+            if (statusResponse.movementComplete) {
+                return { success: true, position: statusResponse.position };
+            }
+            attempts++;
+        }
+        return { success: false, error: 'Movement timeout' };
+        
+    } else if (initialResponse[0] === 0x11) {
+        return { success: false, error: 'Command rejected (NACK)' };
+    }
+}
 ```
 
 ## Development Guidelines
@@ -108,6 +184,111 @@ async function badExample(port, commands) {
     for (const command of commands) {
         const response = await sendCommand(port, command); // Opens and closes port each time
     }
+}
+```
+
+### Macro Command Implementation Pattern
+
+**ESSENTIAL**: Proper handling of ACK/NACK responses and status polling:
+
+```javascript
+// Complete macro command implementation
+async function executeMacroCommand(port, command, cartAddress = 0x01, timeoutMs = 5000) {
+    const commandBuffer = createFlexiCartCommand(command.cmd, command.ctrl, command.data, cartAddress);
+    
+    try {
+        // Step 1: Send command and get immediate ACK/NACK
+        const initialResponse = await sendCommand(port, commandBuffer, 1000);
+        
+        if (initialResponse.length === 0) {
+            throw new FlexicartError('No response to command', 'NO_RESPONSE');
+        }
+        
+        const ackByte = initialResponse[0];
+        
+        if (ackByte === 0x11) { // NACK
+            throw new FlexicartError('Command rejected by device', 'COMMAND_NACK');
+        }
+        
+        if (ackByte !== 0x10) { // Not ACK
+            throw new FlexicartError(`Unexpected response: 0x${ackByte.toString(16)}`, 'UNEXPECTED_RESPONSE');
+        }
+        
+        // Step 2: Command accepted (ACK), now poll for completion
+        const startTime = Date.now();
+        const statusCommand = { cmd: 0x61, ctrl: 0x10, data: 0x80 }; // General status
+        
+        while ((Date.now() - startTime) < timeoutMs) {
+            await delay(100); // Poll interval
+            
+            const statusResponse = await getFlexicartStatus(port, cartAddress);
+            
+            // Check for completion based on command type
+            if (isCommandComplete(command, statusResponse)) {
+                return {
+                    success: true,
+                    initialResponse: ackByte,
+                    finalStatus: statusResponse,
+                    executionTime: Date.now() - startTime
+                };
+            }
+            
+            // Check for error conditions
+            if (statusResponse.error) {
+                throw new FlexicartError(`Operation failed: ${statusResponse.error}`, 'OPERATION_FAILED');
+            }
+        }
+        
+        throw new FlexicartError('Command timeout - operation may still be in progress', 'COMMAND_TIMEOUT');
+        
+    } catch (error) {
+        throw new FlexicartError(`Macro command failed: ${error.message}`, 'MACRO_COMMAND_FAILED', { command, error });
+    }
+}
+
+// Determine if macro command has completed based on status
+function isCommandComplete(command, status) {
+    switch (command.cmd) {
+        case 0x41: // Elevator movement
+            return !status.elevatorMoving;
+        case 0x42: // Carousel rotation  
+            return !status.carouselMoving;
+        case 0x43: // Move to position
+            return !status.elevatorMoving && !status.carouselMoving;
+        case 0x44: // Load/Unload cart
+            return status.loadComplete || status.unloadComplete;
+        case 0x45: // Eject cart
+            return status.ejectComplete;
+        case 0x46: // Initialize
+            return status.initializationComplete;
+        case 0x47: // Calibrate
+            return status.calibrationComplete;
+        default:
+            return true; // Unknown command, assume complete
+    }
+}
+```
+
+### Status Interrogation Patterns
+
+```javascript
+// Comprehensive status checking for different aspects
+async function getFlexicartStatus(port, cartAddress = 0x01) {
+    const responses = await sendMultipleCommands(port, [
+        createFlexiCartCommand(0x61, 0x10, 0x80, cartAddress), // General status
+        createFlexiCartCommand(0x61, 0x20, 0x80, cartAddress), // Position status  
+        createFlexiCartCommand(0x61, 0x40, 0x80, cartAddress)  // Error status
+    ]);
+    
+    return {
+        general: parseGeneralStatus(responses[0]),
+        position: parsePositionStatus(responses[1]),  
+        errors: parseErrorStatus(responses[2]),
+        elevatorMoving: checkMovementStatus(responses[0], 'elevator'),
+        carouselMoving: checkMovementStatus(responses[0], 'carousel'),
+        currentPosition: extractPosition(responses[1]),
+        timestamp: new Date().toISOString()
+    };
 }
 ```
 
@@ -222,9 +403,14 @@ await testFlexicartCommunication('/dev/ttyRP8', 0x01);
 await sendOnAirCommand('/dev/ttyRP8', true);  // Turn ON
 await sendOnAirCommand('/dev/ttyRP8', false); // Turn OFF
 
-// Movement commands (PROTOCOL ACCEPTED)
-await sendElevatorCommand('/dev/ttyRP8', 'UP');
-await sendElevatorCommand('/dev/ttyRP8', 'DOWN');
+// Movement commands (PROTOCOL ACCEPTED - ACK/NACK + Status Required)
+const elevatorResult = await executeMacroCommand('/dev/ttyRP8', FLEXICART_COMMANDS.ELEVATOR_UP);
+const carouselResult = await executeMacroCommand('/dev/ttyRP8', FLEXICART_COMMANDS.CAROUSEL_CW);
+
+// Status interrogation (CONFIRMED WORKING)
+const status = await getFlexicartStatus('/dev/ttyRP8', 0x01);
+console.log('Current position:', status.currentPosition);
+console.log('Movement active:', status.elevatorMoving || status.carouselMoving);
 ```
 
 ## API Integration Points
@@ -279,9 +465,13 @@ await sendElevatorCommand('/dev/ttyRP8', 'DOWN');
     "cartAddress": 0x01,
     "commands": {
         "onAirTally": "CONFIRMED WORKING",
-        "elevatorMovement": "PROTOCOL ACCEPTED",
-        "statusRequest": "CONFIRMED WORKING"
-    }
+        "elevatorMovement": "MACRO COMMAND - ACK/NACK + STATUS",
+        "statusRequest": "CONFIRMED WORKING",
+        "carouselMovement": "MACRO COMMAND - ACK/NACK + STATUS",
+        "cartOperations": "MACRO COMMAND - ACK/NACK + STATUS"
+    },
+    "macroCommandTimeout": 5000,
+    "statusPollInterval": 100
 }
 ```
 
@@ -294,13 +484,19 @@ await sendElevatorCommand('/dev/ttyRP8', 'DOWN');
 5. **Check `tests/flexicart_protocol_test.js`** for latest working examples
 6. **Use `/dev/ttyRP8` and cart address `0x01`** as validated working configuration
 7. **Remember checksum calculation** - XOR of bytes 1-7 in 9-byte command format
+8. **Implement macro command pattern** - handle ACK/NACK + status polling for complex operations
+9. **Always timeout macro operations** - use 5-second timeout with 100ms status polling
 
 ## Recent Discoveries
 
-- ON-AIR tally functionality is fully operational and provides clear status feedback
-- Elevator movement commands are accepted by the protocol but physical movement confirmation requires visual verification
-- Port locking issues resolved by using single-connection approach for multiple commands
-- FlexiCart responds to multiple cart addresses (0x01, 0x02, 0x04, 0x08) on the same serial port
-- Response analysis shows clear distinction between sync bytes (0xFF) and data bytes
+- **ON-AIR tally functionality**: Fully operational and provides clear status feedback
+- **Macro command system**: Movement and cart operations use ACK/NACK + status interrogation pattern
+- **Elevator movement commands**: Accepted but require status polling to confirm completion  
+- **Port locking issues**: Resolved by using single-connection approach for multiple commands
+- **FlexiCart multi-addressing**: Responds to multiple cart addresses (0x01, 0x02, 0x04, 0x08) on same port
+- **Status interrogation**: Essential for determining completion of macro operations
+- **Response patterns**: Clear distinction between immediate responses and macro command responses
 
-This codebase represents a mature, working industrial communication system with validated protocols and comprehensive testing infrastructure.
+This codebase represents a mature, working industrial communication system with validated protocols and comprehensive testing infrastructure. The macro command system is critical for proper FlexiCart operation.
+
+
