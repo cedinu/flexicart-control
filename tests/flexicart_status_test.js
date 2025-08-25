@@ -32,12 +32,12 @@ function createCommand(cmd, ctrl = 0x00, data = 0x80, cartAddress = 0x01) {
     command[6] = ctrl;          // CTRL
     command[7] = data;          // DATA
     
-    // Calculate checksum
-    let checksum = 0;
+    // CORRECTED: Use 2's complement checksum (not XOR)
+    let sum = 0;
     for (let i = 1; i < 8; i++) {
-        checksum ^= command[i];
+        sum += command[i];
     }
-    command[8] = checksum;      // CS
+    command[8] = (0x100 - (sum & 0xFF)) & 0xFF;  // CS
     
     return command;
 }

@@ -65,7 +65,7 @@ const FLEXICART_COMMAND = {
     CMD: 0x00,      // Command byte (see FLEXICART_COMMANDS)
     CTRL: 0x00,     // Control byte (command parameter)
     DATA: 0x80,     // Data byte (typically 0x80)  
-    CS: 0x00        // Checksum (calculated XOR of BC through DATA)
+    CS: 0x00        // Checksum (calculated 2's complement of BC through DATA)
 };
 ```
 
@@ -306,12 +306,12 @@ function createFlexiCartCommand(cmd, ctrl = 0x00, data = 0x80, cartAddress = 0x0
     command[6] = ctrl;          // CTRL
     command[7] = data;          // DATA
     
-    // Calculate checksum (XOR of bytes 1-7)
-    let checksum = 0;
+    // CRITICAL: Use 2's complement checksum (NOT XOR)
+    let sum = 0;
     for (let i = 1; i < 8; i++) {
-        checksum ^= command[i];
+        sum += command[i];
     }
-    command[8] = checksum;      // CS
+    command[8] = (0x100 - (sum & 0xFF)) & 0xFF;  // CS
     
     return command;
 }
@@ -490,7 +490,7 @@ console.log('Movement active:', status.elevatorMoving || status.carouselMoving);
 6. **Test status commands first** - immediate response validation for basic connectivity
 7. **Check `tests/flexicart_test_runner.js`** for comprehensive corrected test suite
 8. **Use cart address `0x01`** as validated working configuration
-9. **Remember checksum calculation** - XOR of bytes 1-7 in 9-byte command format
+9. **CRITICAL: Use 2's complement checksum** - sum bytes 1-7, then `(0x100 - (sum & 0xFF)) & 0xFF`
 10. **Implement macro command pattern** - handle ACK/NACK + status polling for complex operations
 11. **Always timeout macro operations** - use 5-second timeout with 100ms status polling
 
@@ -498,6 +498,7 @@ console.log('Movement active:', status.elevatorMoving || status.carouselMoving);
 
 - **CORRECTED SETUP**: Cabling issue resolved - `/dev/ttyRP0` now working correctly
 - **CORRECTED ACK PROTOCOL**: FlexiCart responds with 0x04 (not 0x10) for command acceptance
+- **CRITICAL CHECKSUM DISCOVERY**: FlexiCart requires 2's complement checksum (NOT XOR)
 - **Macro command system**: Movement and cart operations use ACK/NACK + status interrogation pattern
 - **Status commands working**: Immediate response commands return data directly
 - **Port management critical**: Single-connection approach prevents port locking issues
@@ -505,6 +506,7 @@ console.log('Movement active:', status.elevatorMoving || status.carouselMoving);
 - **Status interrogation**: Essential for determining completion of macro operations
 - **Response patterns**: Clear distinction between immediate responses (data) and macro responses (ACK/NACK)
 - **Test suite updated**: Comprehensive new test suite validates corrected setup
+- **Checksum method validated**: 2's complement checksum confirmed via comprehensive testing
 
 ## Updated Test Architecture
 

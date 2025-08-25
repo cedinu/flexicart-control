@@ -161,7 +161,7 @@ const FLEXICART_COMMANDS = {
 };
 
 /**
- * Create FlexiCart command packet with CORRECTED protocol
+ * Create FlexiCart command packet with CORRECTED 2's complement protocol
  */
 function createFlexiCartCommand(cmd, ctrl = 0x00, data = 0x80, cartAddress = FLEXICART_CONFIG.DEFAULT_CART_ADDRESS) {
     const command = Buffer.alloc(9);
@@ -174,12 +174,12 @@ function createFlexiCartCommand(cmd, ctrl = 0x00, data = 0x80, cartAddress = FLE
     command[6] = ctrl;                          // CTRL
     command[7] = data;                          // DATA
     
-    // Calculate checksum (XOR of bytes 1-7)
-    let checksum = 0;
+    // CORRECTED: Use 2's complement checksum (not XOR)
+    let sum = 0;
     for (let i = 1; i < 8; i++) {
-        checksum ^= command[i];
+        sum += command[i];
     }
-    command[8] = checksum;                      // CS
+    command[8] = (0x100 - (sum & 0xFF)) & 0xFF;  // CS
     
     return command;
 }

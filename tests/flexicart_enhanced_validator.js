@@ -23,7 +23,7 @@ const CONFIG = {
 };
 
 /**
- * Create FlexiCart command with proper checksum
+ * Create FlexiCart command with proper checksum (2's complement - CORRECTED)
  */
 function createFlexiCartCommand(cmd, ctrl = 0x00, data = 0x80, cartAddress = 0x01) {
     const command = Buffer.alloc(9);
@@ -36,12 +36,12 @@ function createFlexiCartCommand(cmd, ctrl = 0x00, data = 0x80, cartAddress = 0x0
     command[6] = ctrl;          // CTRL
     command[7] = data;          // DATA
     
-    // Calculate checksum (XOR of bytes 1-7)
-    let checksum = 0;
+    // CORRECTED: Use 2's complement checksum (sum + 2's complement)
+    let sum = 0;
     for (let i = 1; i < 8; i++) {
-        checksum ^= command[i];
+        sum += command[i];
     }
-    command[8] = checksum;      // CS
+    command[8] = (0x100 - (sum & 0xFF)) & 0xFF;  // CS
     
     return command;
 }
