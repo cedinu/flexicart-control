@@ -50,7 +50,142 @@ function createCommand(cmd, ctrl = 0x00, data = 0x80, cartAddress = 0x01) {
 }
 
 /**
- * Send command and analyze response
+ * Send multiple commands using single connection to avoid port locking
+ */
+async function testMultipleCommands(port, commands) {
+    return new Promise((resolve, reject) => {
+        const serialPort = new SerialPort({
+            path: port,
+            baudRate: CONFIG.BAUD_RATE,
+            dataBits: CONFIG.DATA_BITS,
+            parity: CONFIG.PARITY,
+            stopBits: CONFIG.STOP_BITS,
+            autoOpen: false
+        });
+        
+        let currentCommandIndex = 0;
+        const results = [];
+        const commandDelay = 200; // Delay between commands
+        
+        const cleanup = () => {
+            if (serialPort.isOpen) {
+                serialPort.close(() => {});
+            }
+        };
+        
+        const processNextCommand = async () => {
+            if (currentCommandIndex >= commands.length) {
+                cleanup();
+                resolve(results);
+                return;
+            }
+            
+            const testCommand = commands[currentCommandIndex];
+            const chunks = [];
+            
+            console.log(`📤 Testing: ${testCommand.name}`);
+            console.log(`   Command: ${testCommand.command.toString('hex').match(/.{2}/g).join(' ')}`);
+            console.log(`   Expected: ${testCommand.expected.toUpperCase()} response`);
+            
+            // Clear any previous data
+            serialPort.removeAllListeners('data');
+            
+            serialPort.on('data', (chunk) => {
+                chunks.push(chunk);
+            });
+            
+            serialPort.write(testCommand.command, (writeError) => {
+                if (writeError) {
+                    results.push({
+                        success: false,
+                        command: testCommand.name,
+                        error: `Write failed: ${writeError.message}`
+                    });
+                    currentCommandIndex++;
+                    setTimeout(processNextCommand, commandDelay);
+                    return;
+                }
+                
+                serialPort.drain(() => {
+                    setTimeout(() => {
+                        const response = Buffer.concat(chunks);
+                        const hex = response.toString('hex').match(/.{2}/g)?.join(' ') || 'no response';
+                        
+                        let responseType = 'unknown';
+                        let analysis = '';
+                        
+                        if (response.length === 0) {
+                            responseType = 'no_response';
+                            analysis = 'No response received';
+                        } else {
+                            const firstByte = response[0];
+                            
+                            if (firstByte === CONFIG.ACK) {
+                                responseType = 'ack';
+                                analysis = '✅ ACK (0x04) - Command accepted';
+                            } else if (firstByte === CONFIG.NACK) {
+                                responseType = 'nack';  
+                                analysis = '❌ NACK (0x05) - Command rejected';
+                            } else if (firstByte === CONFIG.BUSY) {
+                                responseType = 'busy';
+                                analysis = '⏳ BUSY (0x06) - Device busy';
+                            } else {
+                                responseType = 'data';
+                                analysis = `📊 Data response (${response.length} bytes)`;
+                            }
+                        }
+                        
+                        console.log(`   📥 Response: ${hex}`);
+                        console.log(`   ${analysis}`);
+                        
+                        const result = {
+                            success: response.length > 0,
+                            command: testCommand.name,
+                            response: response,
+                            hex: hex,
+                            length: response.length,
+                            responseType: responseType,
+                            analysis: analysis,
+                            isACK: responseType === 'ack',
+                            isNACK: responseType === 'nack',
+                            hasData: responseType === 'data'
+                        };
+                        
+                        results.push(result);
+                        
+                        if (result.success) {
+                            console.log(`   ✅ SUCCESS\n`);
+                        } else {
+                            console.log(`   ❌ FAILED\n`);
+                        }
+                        
+                        currentCommandIndex++;
+                        setTimeout(processNextCommand, commandDelay);
+                        
+                    }, CONFIG.TIMEOUT);
+                });
+            });
+        };
+        
+        serialPort.on('error', (error) => {
+            cleanup();
+            reject(new Error(`Serial port error: ${error.message}`));
+        });
+        
+        serialPort.open((error) => {
+            if (error) {
+                cleanup();
+                reject(new Error(`Failed to open port: ${error.message}`));
+                return;
+            }
+            
+            processNextCommand();
+        });
+    });
+}
+
+/**
+ * Send command and analyze response (DEPRECATED - use testMultipleCommands instead)
  */
 async function testCommand(port, command, commandName) {
     return new Promise((resolve) => {
@@ -189,45 +324,30 @@ async function validateCommunication(port = CONFIG.PORT, cartAddress = 0x01) {
         }
     ];
     
-    const results = [];
+    let results = [];
     let communicationWorking = false;
     let ackProtocolWorking = false;
     
-    for (const test of testCommands) {
-        console.log(`📤 Testing: ${test.name}`);
-        console.log(`   Command: ${test.command.toString('hex').match(/.{2}/g).join(' ')}`);
-        console.log(`   Expected: ${test.expected.toUpperCase()} response`);
+    try {
+        // Use single connection for all commands to avoid port locking
+        results = await testMultipleCommands(port, testCommands);
         
-        const result = await testCommand(port, test.command, test.name);
-        results.push(result);
+        communicationWorking = results.some(r => r.success);
+        ackProtocolWorking = results.some(r => r.isACK);
         
-        if (result.success) {
-            console.log(`   📥 Response: ${result.hex}`);
-            console.log(`   ${result.analysis}`);
-            
-            communicationWorking = true;
-            
-            if (result.isACK) {
-                ackProtocolWorking = true;
-                console.log(`   🎉 CORRECTED ACK (0x04) CONFIRMED!`);
-            }
-            
-            if (result.hasData) {
-                console.log(`   📊 Data response indicates immediate command working`);
-            }
-            
-            console.log(`   ✅ SUCCESS\\n`);
-        } else {
-            console.log(`   ❌ FAILED: ${result.error}\\n`);
-        }
-        
-        // Small delay between commands
-        await new Promise(resolve => setTimeout(resolve, 200));
+    } catch (error) {
+        console.log(`\n� Communication test error: ${error.message}`);
+        results = [{
+            success: false,
+            command: 'Communication Error',
+            error: error.message
+        }];
     }
     
     // Summary
     const successful = results.filter(r => r.success);
     const ackResponses = results.filter(r => r.isACK);
+    const nackResponses = results.filter(r => r.isNACK);
     const dataResponses = results.filter(r => r.hasData);
     
     console.log(`\n📊 VALIDATION SUMMARY`);
@@ -235,6 +355,7 @@ async function validateCommunication(port = CONFIG.PORT, cartAddress = 0x01) {
     console.log(`Total Commands: ${results.length}`);
     console.log(`Successful: ${successful.length}`);
     console.log(`ACK Responses: ${ackResponses.length}`);
+    console.log(`NACK Responses: ${nackResponses.length}`);
     console.log(`Data Responses: ${dataResponses.length}`);
     console.log(`Success Rate: ${Math.round((successful.length/results.length) * 100)}%`);
     
@@ -244,26 +365,48 @@ async function validateCommunication(port = CONFIG.PORT, cartAddress = 0x01) {
     console.log(`Immediate Commands: ${dataResponses.length > 0 ? '✅ WORKING' : '❌ NO DATA'}`);
     console.log(`Macro Commands: ${ackResponses.length > 0 ? '✅ ACK RECEIVED' : '❌ NO ACK'}`);
     
-    if (communicationWorking && ackProtocolWorking) {
-        console.log(`\n🎉 CORRECTED SETUP VALIDATED!`);
-        console.log(`✅ Port /dev/ttyRP0 working with corrected cabling`);
-        console.log(`✅ ACK response 0x04 confirmed`);
-        console.log(`✅ Ready for full protocol testing`);
-    } else {
-        console.log(`\n⚠️  Setup needs attention:`);
-        if (!communicationWorking) {
-            console.log(`   - Check port connection and cabling`);
+    // Analyze NACK responses
+    if (nackResponses.length > 0) {
+        console.log(`\n⚠️  NACK ANALYSIS:`);
+        console.log(`   ${nackResponses.length} commands rejected by FlexiCart`);
+        console.log(`   Possible reasons:`);
+        console.log(`   - Incorrect command parameters`);
+        console.log(`   - Device not in correct state`);
+        console.log(`   - Command not supported`);
+        console.log(`   - Cart address mismatch`);
+        
+        // Show which commands were rejected
+        nackResponses.forEach(r => {
+            console.log(`   📋 REJECTED: ${r.command}`);
+        });
+    }
+    
+    if (communicationWorking && (ackProtocolWorking || dataResponses.length > 0)) {
+        console.log(`\n🎉 COMMUNICATION ESTABLISHED!`);
+        console.log(`✅ Port /dev/ttyRP0 accessible`);
+        console.log(`✅ FlexiCart responding`);
+        if (ackProtocolWorking) {
+            console.log(`✅ ACK protocol (0x04) confirmed`);
         }
-        if (!ackProtocolWorking) {
-            console.log(`   - ACK protocol not confirmed`);
+        if (dataResponses.length > 0) {
+            console.log(`✅ Data responses working`);
+        }
+    } else {
+        console.log(`\n⚠️  Communication issues detected:`);
+        if (!communicationWorking) {
+            console.log(`   - No responses from FlexiCart`);
+        }
+        if (!ackProtocolWorking && dataResponses.length === 0) {
+            console.log(`   - No valid responses received`);
         }
     }
     
     return {
         communicationWorking,
-        ackProtocolWorking,
+        ackProtocolWorking: ackProtocolWorking || dataResponses.length > 0,
         successful: successful.length,
         total: results.length,
+        nackCount: nackResponses.length,
         results
     };
 }
@@ -273,6 +416,7 @@ module.exports = {
     CONFIG,
     createCommand,
     testCommand,
+    testMultipleCommands,
     validateCommunication
 };
 

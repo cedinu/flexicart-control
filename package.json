@@ -15,9 +15,11 @@
     "vtr:test": "node tests/check_vtr_status.js --test",
     "flexicart:test": "node tests/flexicart_test_runner.js",
     "flexicart:comm": "node tests/flexicart_communication_validator.js",
+    "flexicart:enhanced": "node tests/flexicart_enhanced_validator.js",
     "flexicart:status": "node tests/flexicart_status_test.js",
     "flexicart:macro": "node tests/flexicart_macro_test.js",
-    "flexicart:master": "node tests/flexicart_master_test.js"
+    "flexicart:master": "node tests/flexicart_master_test.js",
+    "flexicart:discover": "node tests/flexicart_command_discovery.js"
   },
   "dependencies": {
     "express": "^4.x",
