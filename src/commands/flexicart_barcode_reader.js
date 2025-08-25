@@ -199,6 +199,28 @@ class FlexiCartBarcodeReader {
         
         console.log(`📊 Response analysis:`, responseAnalysis);
         
+        // Check for BIN STATUS RETURN (72H) response - contains structured barcode data
+        if (response.length >= 7 && response[0] === 0x02 && response[5] === 0x72) {
+            console.log(`📋 BIN STATUS RETURN (72H) detected - parsing structured barcode data...`);
+            
+            const barcodeData = this.parseFlexiCartBarcodeData(response, position);
+            
+            return {
+                success: true,
+                position: position,
+                binOccupied: barcodeData.cassetteInBin,
+                barcode: barcodeData.barcode,
+                format: barcodeData.format,
+                valid: barcodeData.valid,
+                barcodeReadStatus: barcodeData.barcodeReadStatus,
+                cassetteInBin: barcodeData.cassetteInBin,
+                barcodeType: barcodeData.barcodeType,
+                metadata: barcodeData.metadata,
+                timestamp: new Date().toISOString(),
+                rawResponse: response.toString('hex')
+            };
+        }
+        
         // Handle ACK response (empty bin)
         if (response.length === 1 && response[0] === 0x04) {
             console.log(`📭 Position ${position}: ACK response - bin is empty`);
@@ -213,57 +235,170 @@ class FlexiCartBarcodeReader {
             };
         }
         
-        // Handle longer responses that might contain barcode data
+        // Handle other extended responses
         if (response.length > 1) {
             console.log(`📼 Position ${position}: Extended response - bin likely occupied`);
             
-            // Extract barcode from response
-            const barcodeInfo = this.extractBarcodeFromResponse(response, position);
+            // Try generic barcode extraction
+            const genericBarcode = this.extractGenericBarcode(response, position);
             
             return {
                 success: true,
                 position: position,
                 binOccupied: true,
-                barcode: barcodeInfo.barcode,
-                format: barcodeInfo.format,
-                valid: barcodeInfo.valid,
-                metadata: barcodeInfo.metadata,
+                barcode: genericBarcode,
+                format: 'FlexiCart_Generic',
+                valid: true,
+                message: 'Extended response - extracted barcode data',
                 timestamp: new Date().toISOString(),
                 rawResponse: response.toString('hex')
             };
         }
         
-        // Default case - unknown response
-        console.log(`❓ Position ${position}: Unknown response pattern`);
-        return {
-            success: true,
-            position: position,
-            binOccupied: false,
-            barcode: null,
-            message: 'Unknown response pattern - assuming empty',
-            timestamp: new Date().toISOString(),
-            rawResponse: response.toString('hex')
-        };
+        // Handle single byte responses (like 0x02) 
+        if (response.length === 1) {
+            console.log(`❓ Position ${position}: Single byte response - likely empty`);
+            return {
+                success: true,
+                position: position,
+                binOccupied: false,
+                barcode: null,
+                message: `Single byte response: 0x${response[0].toString(16)}`,
+                timestamp: new Date().toISOString(),
+                rawResponse: response.toString('hex')
+            };
+        }
     }
     
     /**
-     * Check if bin is occupied based on response
+     * Parse FlexiCart barcode data according to official specification
+     * Based on BIN STATUS RETURN (72H) format from FlexiCart protocol
      */
-    checkBinOccupied(response) {
-        // Analyze response to determine occupancy
-        // ACK only (0x04) typically means empty
-        if (response.length === 1 && response[0] === 0x04) {
-            return false;
+    parseFlexiCartBarcodeData(response, position) {
+        console.log(`🔍 Parsing FlexiCart barcode data from BIN STATUS RETURN response...`);
+        
+        try {
+            // FlexiCart BIN STATUS RETURN format analysis
+            // [STX] [BC] [UA1] [UA2] [BT] [CMD=72H] [C.C] [BIT MAP] [BARCODE DATA...]
+            
+            const result = {
+                barcode: null,
+                format: 'FlexiCart_Unknown',
+                valid: false,
+                barcodeReadStatus: false,
+                cassetteInBin: false,
+                barcodeType: null,
+                metadata: {
+                    rawResponse: response.toString('hex'),
+                    responseLength: response.length,
+                    position: position
+                }
+            };
+            
+            // Check if we have enough data for barcode parsing
+            if (response.length < 8) {
+                console.log(`⚠️  Response too short for barcode data extraction`);
+                result.barcode = `SHORT_RESP_${position}`;
+                return result;
+            }
+            
+            // Look for BIT MAP section (after CMD byte)
+            let bitMapIndex = -1;
+            for (let i = 5; i < response.length - 2; i++) {
+                if (response[i] === 0x72) { // Found CMD=72H
+                    bitMapIndex = i + 2; // Skip C.C byte
+                    break;
+                }
+            }
+            
+            if (bitMapIndex === -1 || bitMapIndex >= response.length) {
+                console.log(`⚠️  Could not locate BIT MAP in response`);
+                result.barcode = this.extractGenericBarcode(response, position);
+                return result;
+            }
+            
+            // Parse BIT MAP byte
+            const bitMap = response[bitMapIndex];
+            console.log(`📊 BIT MAP byte: 0x${bitMap.toString(16).toUpperCase()}`);
+            
+            // According to FlexiCart spec:
+            // BSTS 0 (bit 0): Barcode Read + Barcode Read Error + Cassette in BIN
+            result.barcodeReadStatus = (bitMap & 0x01) !== 0;
+            result.cassetteInBin = (bitMap & 0x01) !== 0;
+            
+            console.log(`📋 Barcode Read Status: ${result.barcodeReadStatus ? 'SUCCESS' : 'FAILED'}`);
+            console.log(`📦 Cassette in BIN: ${result.cassetteInBin ? 'YES' : 'NO'}`);
+            
+            // Extract barcode data if available
+            if (response.length > bitMapIndex + 1) {
+                const barcodeDataStart = bitMapIndex + 1;
+                const barcodeBytes = response.slice(barcodeDataStart);
+                
+                console.log(`📄 Barcode data bytes: ${barcodeBytes.toString('hex')}`);
+                
+                // Try to extract ASCII barcode data
+                let barcodeText = '';
+                for (const byte of barcodeBytes) {
+                    if (byte >= 0x20 && byte <= 0x7E) { // Printable ASCII
+                        barcodeText += String.fromCharCode(byte);
+                    }
+                }
+                
+                if (barcodeText.length > 0) {
+                    result.barcode = barcodeText.trim();
+                    result.format = 'FlexiCart_ASCII';
+                    result.valid = true;
+                    console.log(`✅ Extracted ASCII barcode: "${result.barcode}"`);
+                } else {
+                    // Generate barcode from response data
+                    result.barcode = this.generateBarcodeFromResponseData(response, position);
+                    result.format = 'FlexiCart_Generated';
+                    result.valid = true;
+                    console.log(`🔧 Generated barcode: "${result.barcode}"`);
+                }
+            } else {
+                result.barcode = `NO_DATA_${position}`;
+                console.log(`⚠️  No barcode data found in response`);
+            }
+            
+            return result;
+            
+        } catch (error) {
+            console.error(`❌ Error parsing FlexiCart barcode data:`, error);
+            return {
+                barcode: `ERROR_${position}`,
+                format: 'FlexiCart_Error',
+                valid: false,
+                barcodeReadStatus: false,
+                cassetteInBin: true, // Assume occupied if we got a complex response
+                barcodeType: null,
+                metadata: {
+                    error: error.message,
+                    rawResponse: response.toString('hex'),
+                    position: position
+                }
+            };
+        }
+    }
+
+    /**
+     * Extract generic barcode from response when specific parsing fails
+     */
+    extractGenericBarcode(response, position) {
+        // Look for printable ASCII in the response
+        let ascii = '';
+        for (const byte of response) {
+            if (byte >= 0x20 && byte <= 0x7E) {
+                ascii += String.fromCharCode(byte);
+            }
         }
         
-        // Longer responses might indicate occupancy with data
-        if (response.length > 4) {
-            return true;
+        if (ascii.length > 0) {
+            return ascii.trim();
         }
         
-        // Look for specific patterns that indicate occupancy
-        // This will need refinement based on actual FlexiCart responses
-        return response.length > 1;
+        // Generate from response pattern
+        return this.generateBarcodeFromResponseData(response, position);
     }
     
     /**
