@@ -20,39 +20,15 @@ async function testRealBarcodeReading() {
     console.log('🔧 Configuration: 30-bin system, cart address 0x01\n');
     
     try {
-        // Test 1: Scan a few specific positions
-        console.log('🧪 Test 1: Scanning specific positions (5, 12, 18)');
-        console.log('==================================================');
+        // Enable automatic barcode scanning first
+        console.log('� Enabling automatic barcode scanning...');
+        stateManager.enableAutoBarcodeScanning();
         
-        const testPositions = [5, 12, 18];
-        const specificResults = await stateManager.barcodeIntegration.scanPositions(testPositions);
-        
-        console.log('\n📋 Specific Position Results:');
-        specificResults.forEach(result => {
-            if (result.success) {
-                if (result.binOccupied) {
-                    console.log(`✅ Position ${result.position}: ${result.barcode} (occupied)`);
-                    console.log(`   Cassette: ${result.cassette.title || 'Unknown Title'}`);
-                    console.log(`   Category: ${result.cassette.category || 'Unknown'}`);
-                    console.log(`   Format: ${result.cassette.format}`);
-                } else {
-                    console.log(`📭 Position ${result.position}: Empty bin`);
-                }
-            } else {
-                console.log(`❌ Position ${result.position}: ${result.error}`);
-            }
-        });
-        
-        // Test 2: Show current inventory after specific scans
-        console.log('\n📊 Current Inventory After Specific Scans:');
-        console.log('==========================================');
-        showInventoryStatus(stateManager);
-        
-        // Test 3: Perform full inventory scan (first 10 positions for demo)
-        console.log('\n🧪 Test 2: Full inventory scan (positions 1-10)');
+        // Test 1: Perform full inventory scan of positions 1-30
+        console.log('\n🧪 Test 1: Full inventory scan (positions 1-30)');
         console.log('===============================================');
         
-        const fullScanResult = await stateManager.barcodeIntegration.performFullInventoryScan(10);
+        const fullScanResult = await stateManager.barcodeIntegration.performFullInventoryScan(30);
         
         console.log('\n📋 Full Scan Results:');
         console.log(`   Positions scanned: ${fullScanResult.summary.totalScanned}`);
@@ -60,10 +36,20 @@ async function testRealBarcodeReading() {
         console.log(`   Occupied bins: ${fullScanResult.summary.occupiedBins}`);
         console.log(`   Barcodes found: ${fullScanResult.summary.binsWithBarcodes}`);
         console.log(`   Inventory updated: ${fullScanResult.inventoryUpdated} cassettes`);
+        console.log(`   Bin lamps set: ${fullScanResult.detectedPositions?.length || 0} positions`);
         
-        if (fullScanResult.occupiedPositions.length > 0) {
+        if (fullScanResult.occupiedPositions && fullScanResult.occupiedPositions.length > 0) {
             console.log(`   Occupied positions: ${fullScanResult.occupiedPositions.join(', ')}`);
         }
+        
+        if (fullScanResult.detectedPositions && fullScanResult.detectedPositions.length > 0) {
+            console.log(`   💡 Lamps activated at: ${fullScanResult.detectedPositions.join(', ')}`);
+        }
+        
+        // Test 2: Show current inventory after full scan
+        console.log('\n📊 Current Inventory After Full Scan:');
+        console.log('=====================================');
+        showInventoryStatus(stateManager);
         
         // Test 3: Show enhanced inventory with barcode information
         console.log('\n📈 Enhanced Inventory with Real Barcode Data:');
@@ -74,24 +60,26 @@ async function testRealBarcodeReading() {
         console.log(`   Total Occupied: ${enhancedInventory.summary.totalOccupied}`);
         console.log(`   Valid Barcodes: ${enhancedInventory.summary.withValidBarcodes}`);
         console.log(`   Needs Scanning: ${enhancedInventory.summary.needsScanning}`);
-        console.log(`   Auto-Scan: ${enhancedInventory.summary.autoScanEnabled ? 'Enabled' : 'Disabled'}\n`);
+        console.log(`   Auto-Scan: ${enhancedInventory.summary.autoScanEnabled ? 'Enabled ✅' : 'Disabled'}\n`);
         
         if (enhancedInventory.bins.length > 0) {
+            console.log('📍 Detected Cassettes:');
             enhancedInventory.bins.forEach(bin => {
                 const cassette = bin.cassette;
                 const barcodeInfo = bin.barcodeStatus === 'valid' ? 
-                    `✅ ${cassette.barcode}` : 
+                    `✅ ${cassette.barcode || 'N/A'}` : 
                     `⚠️  ${bin.barcodeStatus}`;
                     
-                console.log(`📍 Bin ${bin.binNumber}: ${cassette.title || cassette.id} (${cassette.category || 'unknown'})`);
+                console.log(`� Bin ${bin.binNumber}: ${cassette.title || cassette.id} (${cassette.category || 'unknown'})`);
                 console.log(`   ID: ${cassette.id}`);
                 console.log(`   Barcode: ${barcodeInfo}`);
                 console.log(`   Format: ${cassette.format || 'unknown'}`);
                 console.log(`   Last Read: ${cassette.lastBarcodeRead || 'never'}`);
+                console.log(`   Raw Data: ${cassette.rawScanData || 'none'}`);
                 console.log('');
             });
         } else {
-            console.log('   No occupied bins found');
+            console.log('   No occupied bins found - all positions appear empty');
         }
         
         // Test 4: Show barcode reading statistics
@@ -142,6 +130,13 @@ async function testRealBarcodeReading() {
         console.log('\n🎉 Real FlexiCart barcode reading test completed!');
         console.log('✅ Using actual FlexiCart integrated barcode scanner');
         console.log('📡 SENSE BIN STATUS (0x01, 0x62) commands sent to /dev/ttyRP0');
+        console.log('💡 SET BIN LAMP (0x01, 0x09) commands for detected cassettes');
+        console.log('🔄 Auto-scan enabled for continuous monitoring');
+        console.log(`\n📊 Final Stats:`);
+        console.log(`   Positions scanned: 1-30`);
+        console.log(`   Cassettes detected: ${enhancedInventory.summary.totalOccupied}`);
+        console.log(`   Bin lamps activated: ${fullScanResult.detectedPositions?.length || 0}`);
+        console.log(`   Auto-scan: ${enhancedInventory.summary.autoScanEnabled ? 'Active' : 'Inactive'}`);
         
     } catch (error) {
         console.error('\n❌ Test failed:', error.message);
@@ -149,6 +144,7 @@ async function testRealBarcodeReading() {
     } finally {
         // Cleanup
         stateManager.destroy();
+        console.log('🧹 Cleanup completed');
     }
 }
 
