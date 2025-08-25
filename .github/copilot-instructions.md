@@ -457,12 +457,13 @@ console.log('Movement active:', status.elevatorMoving || status.carouselMoving);
 
 ```json
 {
-    "port": "/dev/ttyRP8",
+    "port": "/dev/ttyRP0",
     "baudRate": 38400,
     "dataBits": 8,
     "parity": "even", 
     "stopBits": 1,
     "cartAddress": 0x01,
+    "ackResponse": "0x04",
     "commands": {
         "onAirTally": "CONFIRMED WORKING",
         "elevatorMovement": "MACRO COMMAND - ACK/NACK + STATUS",
@@ -471,32 +472,52 @@ console.log('Movement active:', status.elevatorMoving || status.carouselMoving);
         "cartOperations": "MACRO COMMAND - ACK/NACK + STATUS"
     },
     "macroCommandTimeout": 5000,
-    "statusPollInterval": 100
+    "statusPollInterval": 100,
+    "correctedSetup": {
+        "cabling": "CORRECTED - /dev/ttyRP0 working",
+        "ackProtocol": "CORRECTED - 0x04 ACK response confirmed"
+    }
 }
 ```
 
 ## When Working on This Codebase
 
 1. **Always use 38,400 baud, 8E1 settings** for FlexiCart communication
-2. **Manage serial ports carefully** - use single connection for multiple commands
-3. **Include inter-command delays** (100ms minimum) to prevent communication issues  
-4. **Test ON-AIR tally first** - it's the most reliable indicator of working communication
-5. **Check `tests/flexicart_protocol_test.js`** for latest working examples
-6. **Use `/dev/ttyRP8` and cart address `0x01`** as validated working configuration
-7. **Remember checksum calculation** - XOR of bytes 1-7 in 9-byte command format
-8. **Implement macro command pattern** - handle ACK/NACK + status polling for complex operations
-9. **Always timeout macro operations** - use 5-second timeout with 100ms status polling
+2. **Use /dev/ttyRP0 with corrected cabling** - hardware issue resolved
+3. **Expect ACK response 0x04** - corrected protocol implementation 
+4. **Manage serial ports carefully** - use single connection for multiple commands
+5. **Include inter-command delays** (100ms minimum) to prevent communication issues  
+6. **Test status commands first** - immediate response validation for basic connectivity
+7. **Check `tests/flexicart_test_runner.js`** for comprehensive corrected test suite
+8. **Use cart address `0x01`** as validated working configuration
+9. **Remember checksum calculation** - XOR of bytes 1-7 in 9-byte command format
+10. **Implement macro command pattern** - handle ACK/NACK + status polling for complex operations
+11. **Always timeout macro operations** - use 5-second timeout with 100ms status polling
 
 ## Recent Discoveries
 
-- **ON-AIR tally functionality**: Fully operational and provides clear status feedback
+- **CORRECTED SETUP**: Cabling issue resolved - `/dev/ttyRP0` now working correctly
+- **CORRECTED ACK PROTOCOL**: FlexiCart responds with 0x04 (not 0x10) for command acceptance
 - **Macro command system**: Movement and cart operations use ACK/NACK + status interrogation pattern
-- **Elevator movement commands**: Accepted but require status polling to confirm completion  
-- **Port locking issues**: Resolved by using single-connection approach for multiple commands
+- **Status commands working**: Immediate response commands return data directly
+- **Port management critical**: Single-connection approach prevents port locking issues
 - **FlexiCart multi-addressing**: Responds to multiple cart addresses (0x01, 0x02, 0x04, 0x08) on same port
 - **Status interrogation**: Essential for determining completion of macro operations
-- **Response patterns**: Clear distinction between immediate responses and macro command responses
+- **Response patterns**: Clear distinction between immediate responses (data) and macro responses (ACK/NACK)
+- **Test suite updated**: Comprehensive new test suite validates corrected setup
 
-This codebase represents a mature, working industrial communication system with validated protocols and comprehensive testing infrastructure. The macro command system is critical for proper FlexiCart operation.
+## Updated Test Architecture
+
+The test suite has been completely rewritten to reflect the corrected setup:
+
+- **`flexicart_test_runner.js`**: Master test orchestrator with corrected configuration
+- **`flexicart_communication_validator.js`**: Basic communication validation with 0x04 ACK
+- **`flexicart_status_test.js`**: Immediate response command testing
+- **`flexicart_macro_test.js`**: Macro command ACK/NACK + status polling validation
+- **`flexicart_master_test.js`**: Comprehensive protocol test suite
+
+All tests configured for `/dev/ttyRP0` with 0x04 ACK response expectation.
+
+This codebase represents a mature, working industrial communication system with validated protocols and comprehensive testing infrastructure. The macro command system is critical for proper FlexiCart operation, and the corrected hardware setup ensures reliable communication.
 
 

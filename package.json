@@ -12,7 +12,12 @@
     "vtr:pause": "node tests/check_vtr_status.js --pause",
     "vtr:stop": "node tests/check_vtr_status.js --stop",
     "vtr:monitor": "node tests/check_vtr_status.js --monitor",
-    "vtr:test": "node tests/check_vtr_status.js --test"
+    "vtr:test": "node tests/check_vtr_status.js --test",
+    "flexicart:test": "node tests/flexicart_test_runner.js",
+    "flexicart:comm": "node tests/flexicart_communication_validator.js",
+    "flexicart:status": "node tests/flexicart_status_test.js",
+    "flexicart:macro": "node tests/flexicart_macro_test.js",
+    "flexicart:master": "node tests/flexicart_master_test.js"
   },
   "dependencies": {
     "express": "^4.x",
