@@ -283,7 +283,6 @@ async function sendCommandOnSharedPort(serialPort, command, commandName, timeout
  */
 async function sendCommand(port, command, timeout = FLEXICART_CONFIG.DEFAULT_TIMEOUT) {
     return new Promise((resolve, reject) => {
-        const SerialPort = require('serialport');
         const serialPort = new SerialPort({
             path: port,
             baudRate: FLEXICART_CONFIG.BAUD_RATE,
@@ -631,7 +630,6 @@ class FlexiCartMasterTest {
         };
         
         // Use single shared connection to prevent port locking
-        const SerialPort = require('serialport');
         let serialPort = null;
         
         try {
