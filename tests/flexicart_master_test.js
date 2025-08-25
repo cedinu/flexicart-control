@@ -229,83 +229,52 @@ function analyzeResponse(response, commandName = 'Unknown') {
 }
 
 /**
- * Send command with proper error handling and CORRECTED ACK detection
+ * Send command using shared serial port connection (prevents port locking)
  */
-async function sendCommand(port, command, timeout = FLEXICART_CONFIG.DEFAULT_TIMEOUT) {
-    return new Promise((resolve, reject) => {
-        let serialPort = null;
-        let timeoutHandle = null;
+async function sendCommandOnSharedPort(serialPort, command, commandName, timeout = FLEXICART_CONFIG.DEFAULT_TIMEOUT) {
+    return new Promise((resolve) => {
         const chunks = [];
-        let isResolved = false;
+        let timeoutHandle;
         
         const cleanup = () => {
-            if (timeoutHandle) {
-                clearTimeout(timeoutHandle);
-                timeoutHandle = null;
-            }
-            if (serialPort && serialPort.isOpen) {
-                serialPort.close(() => {});
-            }
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            serialPort.removeAllListeners('data');
         };
         
-        const safeResolve = (value) => {
-            if (!isResolved) {
-                isResolved = true;
+        serialPort.on('data', (chunk) => {
+            chunks.push(chunk);
+        });
+        
+        serialPort.write(command, (writeError) => {
+            if (writeError) {
                 cleanup();
-                resolve(value);
-            }
-        };
-        
-        const safeReject = (error) => {
-            if (!isResolved) {
-                isResolved = true;
-                cleanup();
-                reject(error);
-            }
-        };
-        
-        try {
-            serialPort = new SerialPort({
-                path: port,
-                baudRate: FLEXICART_CONFIG.BAUD_RATE,
-                dataBits: FLEXICART_CONFIG.DATA_BITS,
-                parity: FLEXICART_CONFIG.PARITY,
-                stopBits: FLEXICART_CONFIG.STOP_BITS,
-                autoOpen: false
-            });
-            
-            serialPort.on('data', (chunk) => {
-                chunks.push(chunk);
-            });
-            
-            serialPort.on('error', (error) => {
-                safeReject(new Error(`Serial port error: ${error.message}`));
-            });
-            
-            serialPort.open((error) => {
-                if (error) {
-                    safeReject(new Error(`Failed to open port: ${error.message}`));
-                    return;
-                }
-                
-                serialPort.write(command, (writeError) => {
-                    if (writeError) {
-                        safeReject(new Error(`Failed to write command: ${writeError.message}`));
-                        return;
-                    }
-                    
-                    serialPort.drain(() => {
-                        timeoutHandle = setTimeout(() => {
-                            const response = Buffer.concat(chunks);
-                            safeResolve(response);
-                        }, timeout);
-                    });
+                resolve({
+                    success: false,
+                    error: `Write failed: ${writeError.message || 'Unknown write error'}`,
+                    commandName: commandName
                 });
-            });
+                return;
+            }
             
-        } catch (error) {
-            safeReject(new Error(`Setup error: ${error.message}`));
-        }
+            serialPort.drain(() => {
+                timeoutHandle = setTimeout(() => {
+                    cleanup();
+                    
+                    const response = Buffer.concat(chunks);
+                    const analysis = analyzeResponse(response);
+                    
+                    resolve({
+                        success: response.length > 0,
+                        response: response,
+                        analysis: analysis,
+                        hex: response.toString('hex').match(/.{2}/g)?.join(' ') || 'no response',
+                        commandName: commandName,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                }, timeout);
+            });
+        });
     });
 }
 
@@ -583,9 +552,33 @@ class FlexiCartMasterTest {
             timestamp: new Date().toISOString()
         };
         
+        // Use single shared connection to prevent port locking
+        const SerialPort = require('serialport');
+        let serialPort = null;
+        
         try {
+            // Open single connection for all tests
+            console.log(`\n🔌 Opening shared serial connection...`);
+            serialPort = new SerialPort({
+                path: port,
+                baudRate: FLEXICART_CONFIG.BAUD_RATE,
+                dataBits: FLEXICART_CONFIG.DATA_BITS,
+                parity: FLEXICART_CONFIG.PARITY,
+                stopBits: FLEXICART_CONFIG.STOP_BITS,
+                autoOpen: false
+            });
+            
+            await new Promise((resolve, reject) => {
+                serialPort.open((error) => {
+                    if (error) reject(new Error(`Failed to open port: ${error.message}`));
+                    else resolve();
+                });
+            });
+            
+            console.log(`✅ Serial connection established`);
+            
             // Test 1: Basic Communication
-            testResults.basicCommunication = await this.testBasicCommunication(port, cartAddress);
+            testResults.basicCommunication = await this.testBasicCommunicationShared(serialPort, cartAddress);
             
             if (!testResults.basicCommunication) {
                 console.log(`\n❌ ABORTING: Basic communication failed`);
@@ -593,13 +586,13 @@ class FlexiCartMasterTest {
             }
             
             // Test 2: Immediate Commands
-            testResults.immediateCommands = await this.testImmediateCommands(port, cartAddress);
+            testResults.immediateCommands = await this.testImmediateCommandsShared(serialPort, cartAddress);
             
             // Test 3: Control Commands
-            testResults.controlCommands = await this.testControlCommands(port, cartAddress);
+            testResults.controlCommands = await this.testControlCommandsShared(serialPort, cartAddress);
             
-            // Test 4: Macro Commands
-            testResults.macroCommands = await this.testMacroCommands(port, cartAddress);
+            // Test 4: Macro Commands (if working)
+            testResults.macroCommands = await this.testMacroCommandsShared(serialPort, cartAddress);
             
             // Final Summary
             const totalTests = testResults.immediateCommands.length + testResults.controlCommands.length + testResults.macroCommands.length;
@@ -619,9 +612,180 @@ class FlexiCartMasterTest {
             
         } catch (error) {
             console.log(`\n❌ TEST SUITE ERROR: ${error.message}`);
+        } finally {
+            // Always close the shared connection
+            if (serialPort && serialPort.isOpen) {
+                console.log(`\n🔌 Closing serial connection...`);
+                await new Promise((resolve) => {
+                    serialPort.close((error) => {
+                        if (error) console.log(`Warning: Error closing port: ${error.message}`);
+                        resolve();
+                    });
+                });
+            }
         }
         
         return testResults;
+    }
+
+    // Shared connection versions of test methods
+    static async testBasicCommunicationShared(serialPort, cartAddress) {
+        console.log(`\n🔍 BASIC COMMUNICATION TEST`);
+        console.log(`============================`);
+        console.log(`Cart Address: 0x${cartAddress.toString(16).toUpperCase()}`);
+        
+        const commandBuffer = createFlexiCartCommand(
+            FLEXICART_COMMANDS.STATUS_REQUEST.cmd,
+            FLEXICART_COMMANDS.STATUS_REQUEST.ctrl,
+            FLEXICART_COMMANDS.STATUS_REQUEST.data,
+            cartAddress
+        );
+        
+        const result = await sendCommandOnSharedPort(serialPort, commandBuffer, 'Status Request');
+        
+        if (result.success && result.analysis.hasData) {
+            console.log(`\n✅ BASIC COMMUNICATION: WORKING`);
+            console.log(`   Response: ${result.hex}`);
+            console.log(`   Data bytes: ${result.analysis.dataBytes}`);
+            return true;
+        } else {
+            console.log(`\n❌ BASIC COMMUNICATION: FAILED`);
+            console.log(`   Error: ${result.error || 'No data received'}`);
+            return false;
+        }
+    }
+
+    static async testImmediateCommandsShared(serialPort, cartAddress) {
+        console.log(`\n📊 IMMEDIATE RESPONSE COMMANDS TEST`);
+        console.log(`=====================================`);
+        
+        const immediateCommands = Object.entries(FLEXICART_COMMANDS)
+            .filter(([name, cmd]) => cmd.category === 'immediate')
+            .map(([name, cmd]) => ({ name, ...cmd }));
+        
+        const results = [];
+        
+        for (const command of immediateCommands) {
+            console.log(`\n🔍 Testing ${command.name}...`);
+            
+            const commandBuffer = createFlexiCartCommand(command.cmd, command.ctrl, command.data, cartAddress);
+            const result = await sendCommandOnSharedPort(serialPort, commandBuffer, command.name);
+            
+            const success = result.success && result.analysis.hasData;
+            results.push({ 
+                command: command.name, 
+                success: success,
+                response: result.analysis,
+                error: result.error 
+            });
+            
+            if (success) {
+                console.log(`   ✅ ${command.name}: Success - ${result.hex}`);
+            } else {
+                console.log(`   ❌ ${command.name}: Failed - ${result.error || 'No data'}`);
+            }
+            
+            // Inter-command delay
+            await new Promise(resolve => setTimeout(resolve, FLEXICART_CONFIG.INTER_COMMAND_DELAY));
+        }
+        
+        const successful = results.filter(r => r.success);
+        console.log(`\n📈 IMMEDIATE COMMANDS SUMMARY:`);
+        console.log(`   Successful: ${successful.length}/${results.length}`);
+        console.log(`   Success rate: ${Math.round((successful.length/results.length) * 100)}%`);
+        
+        return results;
+    }
+
+    static async testControlCommandsShared(serialPort, cartAddress) {
+        console.log(`\n🎛️  CONTROL COMMANDS TEST`);
+        console.log(`==========================`);
+        
+        const results = [];
+        
+        // Test ON-AIR tally commands
+        const commands = [
+            { name: 'ON_AIR_TALLY_ON', command: FLEXICART_COMMANDS.ON_AIR_TALLY_ON },
+            { name: 'ON_AIR_TALLY_OFF', command: FLEXICART_COMMANDS.ON_AIR_TALLY_OFF }
+        ];
+        
+        for (const { name, command } of commands) {
+            console.log(`\n${name === 'ON_AIR_TALLY_ON' ? '🔴' : '⚫'} Testing ${name}...`);
+            
+            const commandBuffer = createFlexiCartCommand(command.cmd, command.ctrl, command.data, cartAddress);
+            const result = await sendCommandOnSharedPort(serialPort, commandBuffer, name);
+            
+            const success = result.success && (result.analysis.isACK || result.analysis.hasData);
+            results.push({ 
+                command: name, 
+                success: success,
+                response: result.analysis,
+                error: result.error 
+            });
+            
+            if (success) {
+                console.log(`   ✅ ${name}: Success - ${result.hex}`);
+            } else {
+                console.log(`   ❌ ${name}: Failed - ${result.error || 'No response'}`);
+            }
+            
+            // Delay between commands
+            await new Promise(resolve => setTimeout(resolve, FLEXICART_CONFIG.INTER_COMMAND_DELAY));
+        }
+        
+        const successful = results.filter(r => r.success);
+        console.log(`\n📈 CONTROL COMMANDS SUMMARY:`);
+        console.log(`   Successful: ${successful.length}/${results.length}`);
+        console.log(`   ON-AIR Tally: ${successful.length >= 2 ? '✅ Working' : '❌ Issues'}`);
+        
+        return results;
+    }
+
+    static async testMacroCommandsShared(serialPort, cartAddress) {
+        console.log(`\n🔧 MACRO COMMANDS TEST`);
+        console.log(`=======================`);
+        console.log(`Note: These commands return ACK/NACK + require status polling`);
+        
+        const results = [];
+        const macroCommands = Object.entries(FLEXICART_COMMANDS)
+            .filter(([name, cmd]) => cmd.category === 'macro')
+            .slice(0, 2) // Test just first 2 macro commands to avoid timeout
+            .map(([name, cmd]) => ({ name, ...cmd }));
+        
+        for (const command of macroCommands) {
+            console.log(`\n🔧 Testing ${command.name}...`);
+            
+            const commandBuffer = createFlexiCartCommand(command.cmd, command.ctrl, command.data, cartAddress);
+            const result = await sendCommandOnSharedPort(serialPort, commandBuffer, command.name);
+            
+            const success = result.success && (result.analysis.isACK || result.analysis.isNACK);
+            results.push({ 
+                command: command.name, 
+                success: success,
+                response: result.analysis,
+                error: result.error 
+            });
+            
+            if (result.analysis.isACK) {
+                console.log(`   ✅ ${command.name}: ACK received - command accepted`);
+            } else if (result.analysis.isNACK) {
+                console.log(`   ⚠️  ${command.name}: NACK received - command rejected`);
+            } else if (success) {
+                console.log(`   ✅ ${command.name}: Success - ${result.hex}`);
+            } else {
+                console.log(`   ❌ ${command.name}: Failed - ${result.error || 'No response'}`);
+            }
+            
+            // Longer delay for macro commands
+            await new Promise(resolve => setTimeout(resolve, FLEXICART_CONFIG.INTER_COMMAND_DELAY * 2));
+        }
+        
+        const successful = results.filter(r => r.success);
+        console.log(`\n📈 MACRO COMMANDS SUMMARY:`);
+        console.log(`   Successful: ${successful.length}/${results.length}`);
+        console.log(`   ACK/NACK Protocol: ${successful.length > 0 ? '✅ Working' : '❌ Issues'}`);
+        
+        return results;
     }
 }
 
