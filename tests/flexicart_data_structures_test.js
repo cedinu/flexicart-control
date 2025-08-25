@@ -1,6 +1,7 @@
 /**
- * FlexiCart Data Structures Test
+ * FlexiCart Data Structures Test - 30 Bin Configuration
  * Demonstrates usage of the comprehensive FlexiCart data structures
+ * Configured for 30-bin FlexiCart with 2 inserted cassettes
  */
 
 const {
@@ -11,15 +12,15 @@ const {
 } = require('../src/commands/flexicart_data_structures');
 
 /**
- * Test FlexiCart data structures
+ * Test FlexiCart data structures with 30-bin configuration
  */
 async function testFlexiCartDataStructures() {
-    console.log('\n🏗️  FLEXICART DATA STRUCTURES TEST');
-    console.log('=====================================');
+    console.log('\n🏗️  FLEXICART DATA STRUCTURES TEST (30-BIN CONFIG)');
+    console.log('====================================================');
     
     // Test 1: System Status
     console.log('\n📊 Testing System Status...');
-    const systemStatus = new FlexiCartSystemStatus('FC01', 360);
+    const systemStatus = new FlexiCartSystemStatus('FC01', 30);
     
     // Simulate status update
     systemStatus.updateFromResponse({
@@ -28,7 +29,7 @@ async function testFlexiCartDataStructures() {
         movement: { 
             elevator: { position: 5, moving: false },
             carousel: { position: 45, moving: false },
-            currentBin: 45
+            currentBin: 15
         }
     });
     
@@ -45,8 +46,8 @@ async function testFlexiCartDataStructures() {
     
     // Start some operations
     const moveOp = operations.startOperation('move', { 
-        fromBin: 45, 
-        toBin: 120,
+        fromBin: 15, 
+        toBin: 25,
         timeoutMs: 10000 
     });
     console.log(`✅ Started move operation: ${moveOp}`);
@@ -68,7 +69,7 @@ async function testFlexiCartDataStructures() {
     operations.updateOperation(moveOp, { 
         status: 'completed',
         progress: 100,
-        result: { finalBin: 120, success: true }
+        result: { finalBin: 25, success: true }
     });
     
     console.log('✅ Operation completed:');
@@ -78,16 +79,16 @@ async function testFlexiCartDataStructures() {
     console.log(`   Duration: ${completedOp.duration}ms`);
     console.log(`   Steps: ${completedOp.steps.length}`);
     
-    // Test 3: Cassette Bin Occupancy
-    console.log('\n📼 Testing Cassette Bin Occupancy...');
-    const inventory = new CassetteBinOccupancy(360);
+    // Test 3: Cassette Bin Occupancy (30 bins, 2 cassettes)
+    console.log('\n📼 Testing Cassette Bin Occupancy (30 bins, 2 cassettes)...');
+    const inventory = new CassetteBinOccupancy(30);
     
-    // Add some cassettes
+    // Add exactly 2 cassettes as requested
     const testCassettes = [
         {
-            bin: 1,
+            bin: 5,
             cassette: {
-                id: 'CART001',
+                id: 'CART005',
                 type: 'A',
                 title: 'Morning Show Theme',
                 artist: 'Studio Productions',
@@ -104,17 +105,6 @@ async function testFlexiCartDataStructures() {
                 artist: 'Background Music Inc',
                 duration: '00:02:30',
                 category: 'background'
-            }
-        },
-        {
-            bin: 120,
-            cassette: {
-                id: 'CART120',
-                type: 'C',
-                title: 'Commercial Break 1',
-                artist: 'Local Advertiser',
-                duration: '00:01:00',
-                category: 'commercial'
             }
         }
     ];
@@ -138,9 +128,38 @@ async function testFlexiCartDataStructures() {
     const cartById = inventory.findCassetteById('CART015');
     console.log(`   CART015 location: Bin ${cartById ? cartById.binNumber : 'not found'}`);
     
+    // Show occupied bins with cassette IDs
+    const occupiedBins = inventory.getOccupiedBins();
+    console.log(`\n📦 Occupied bins with cassette IDs:`);
+    occupiedBins.forEach(bin => {
+        console.log(`   Bin ${bin.binNumber}: ${bin.cassette.id} - "${bin.cassette.title}"`);
+    });
+    
+    // Show all bins status (visual representation with cassette IDs)
+    console.log(`\n🗂️  Complete Bin Status Overview (${inventory.maxBins} bins):`);
+    let binDisplay = '   ';
+    for (let i = 1; i <= inventory.maxBins; i++) {
+        const isOccupied = inventory.isBinOccupied(i);
+        if (isOccupied) {
+            const cassette = inventory.getCassette(i);
+            binDisplay += `[${cassette.id}]`.padEnd(12);
+        } else {
+            binDisplay += `[Bin-${i.toString().padStart(2, '0')}]`.padEnd(12);
+        }
+        
+        // Line break every 6 bins for readability
+        if (i % 6 === 0) {
+            console.log(binDisplay);
+            binDisplay = '   ';
+        }
+    }
+    if (binDisplay.trim() !== '') {
+        console.log(binDisplay);
+    }
+    
     // Test 4: Complete State Manager
     console.log('\n🎛️  Testing Complete State Manager...');
-    const stateManager = new FlexiCartStateManager('FC01', 360);
+    const stateManager = new FlexiCartStateManager('FC01', 30);
     
     // Set up event handlers
     stateManager.on('statusUpdate', (status) => {
@@ -171,23 +190,22 @@ async function testFlexiCartDataStructures() {
             calibrated: true
         },
         movement: {
-            elevator: { position: 8, moving: false, direction: 'stopped' },
+            elevator: { position: 3, moving: false, direction: 'stopped' },
             carousel: { position: 180, moving: false, direction: 'stopped' },
-            currentBin: 180
+            currentBin: 18
         }
     });
     
-    // Inventory response simulation
+    // Inventory response simulation with 2 cassettes
     stateManager.updateFromResponse('inventory', {
         bins: [
-            { binNumber: 1, occupied: true, cassette: { id: 'CART001', title: 'News Theme' }},
-            { binNumber: 25, occupied: true, cassette: { id: 'CART025', title: 'Sports Intro' }},
-            { binNumber: 100, occupied: false }
+            { binNumber: 5, occupied: true, cassette: { id: 'CART005', title: 'Morning Theme' }},
+            { binNumber: 15, occupied: true, cassette: { id: 'CART015', title: 'Weather Music' }}
         ]
     });
     
     // Operation completion simulation
-    const testOpId = stateManager.operations.startOperation('load', { binNumber: 25 });
+    const testOpId = stateManager.operations.startOperation('load', { binNumber: 15 });
     stateManager.updateFromResponse('operation_complete', {
         operationId: testOpId,
         result: { success: true, cartLoaded: true }
@@ -209,14 +227,22 @@ async function testFlexiCartDataStructures() {
     console.log(`   Metadata version: ${exportedInventory.metadata.version}`);
     
     // Create new inventory and import
-    const newInventory = new CassetteBinOccupancy(360);
+    const newInventory = new CassetteBinOccupancy(30);
     newInventory.importInventory(exportedInventory);
     console.log(`✅ Inventory imported - ${newInventory.getOccupancyStats().occupied} cassettes`);
+    
+    // Show imported inventory with IDs
+    console.log('\n📋 Imported Inventory Layout:');
+    const importedOccupied = newInventory.getOccupiedBins();
+    importedOccupied.forEach(bin => {
+        console.log(`   Bin ${bin.binNumber}: ${bin.cassette.id} - "${bin.cassette.title}"`);
+    });
     
     // Cleanup
     stateManager.destroy();
     
     console.log('\n🎉 All data structure tests completed successfully!');
+    console.log(`📊 Final Summary: 30-bin FlexiCart with ${testCassettes.length} cassettes loaded`);
     
     return {
         systemStatus,
@@ -226,14 +252,14 @@ async function testFlexiCartDataStructures() {
     };
 }
 
-// Example usage patterns
+// Example usage patterns for 30-bin configuration
 function demonstrateUsagePatterns() {
-    console.log('\n📚 USAGE PATTERNS');
-    console.log('==================');
+    console.log('\n📚 USAGE PATTERNS (30-BIN FLEXICART)');
+    console.log('=====================================');
     
     console.log(`
-🔍 1. MONITORING SYSTEM STATUS:
-   const status = new FlexiCartSystemStatus('FC01');
+🔍 1. MONITORING SYSTEM STATUS (30-bin FlexiCart):
+   const status = new FlexiCartSystemStatus('FC01', 30);
    // Update from FlexiCart response
    status.updateFromResponse(parsedResponse);
    
@@ -248,8 +274,8 @@ function demonstrateUsagePatterns() {
 ⚙️ 2. TRACKING OPERATIONS:
    const ops = new FlexiCartOperations();
    
-   // Start operation
-   const opId = ops.startOperation('move', { fromBin: 10, toBin: 50 });
+   // Start operation (bin range 1-30)
+   const opId = ops.startOperation('move', { fromBin: 5, toBin: 15 });
    
    // Add progress updates
    ops.addOperationStep(opId, { 
@@ -263,30 +289,34 @@ function demonstrateUsagePatterns() {
        result: { success: true }
    });
 
-📦 3. MANAGING INVENTORY:
-   const inventory = new CassetteBinOccupancy(360);
+📦 3. MANAGING INVENTORY (30 bins with ID display):
+   const inventory = new CassetteBinOccupancy(30);
    
-   // Add cassette
-   inventory.setCassette(25, {
-       id: 'CART025',
+   // Add cassette with ID display
+   inventory.setCassette(5, {
+       id: 'CART005',
        title: 'Morning Show Theme',
        type: 'A',
        duration: '00:03:30'
    });
    
+   // Visual display shows: Bin 5: CART005 - "Morning Show Theme"
+   
    // Search cassettes
    const jingles = inventory.searchCassettes({ category: 'jingle' });
    
-   // Check occupancy
-   const stats = inventory.getOccupancyStats();
-   console.log('Occupancy:', stats.occupancyRate + '%');
+   // Check occupancy (shows cassette IDs in occupied bins)
+   const occupied = inventory.getOccupiedBins();
+   occupied.forEach(bin => {
+       console.log(\`Bin \${bin.binNumber}: \${bin.cassette.id}\`);
+   });
 
 🎛️ 4. COMPLETE STATE MANAGEMENT:
-   const stateManager = new FlexiCartStateManager('FC01');
+   const stateManager = new FlexiCartStateManager('FC01', 30);
    
-   // Event handling
+   // Event handling with bin status
    stateManager.on('statusUpdate', (status) => {
-       updateUI(status);
+       console.log(\`Current bin: \${status.movement.currentBin}/30\`);
    });
    
    // Update from FlexiCart
