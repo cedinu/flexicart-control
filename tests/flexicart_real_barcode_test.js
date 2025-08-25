@@ -37,13 +37,19 @@ async function testRealBarcodeReading() {
         console.log(`   Barcodes found: ${fullScanResult.summary.binsWithBarcodes}`);
         console.log(`   Inventory updated: ${fullScanResult.inventoryUpdated} cassettes`);
         console.log(`   Bin lamps set: ${fullScanResult.detectedPositions?.length || 0} positions`);
+        console.log(`   Timeout detections: ${fullScanResult.timeoutCount || 0} positions`);
+        console.log(`   Empty bins confirmed: ${fullScanResult.emptyCount || 0} positions`);
         
         if (fullScanResult.occupiedPositions && fullScanResult.occupiedPositions.length > 0) {
-            console.log(`   Occupied positions: ${fullScanResult.occupiedPositions.join(', ')}`);
+            console.log(`   All occupied positions: ${fullScanResult.occupiedPositions.join(', ')}`);
         }
         
         if (fullScanResult.detectedPositions && fullScanResult.detectedPositions.length > 0) {
             console.log(`   💡 Lamps activated at: ${fullScanResult.detectedPositions.join(', ')}`);
+        }
+        
+        if (fullScanResult.timeoutPositions && fullScanResult.timeoutPositions.length > 0) {
+            console.log(`   ⏱️  Timeout-detected cassettes: ${fullScanResult.timeoutPositions.join(', ')}`);
         }
         
         // Test 2: Show current inventory after full scan
@@ -135,9 +141,27 @@ async function testRealBarcodeReading() {
         console.log(`\n📊 Final Stats:`);
         console.log(`   Positions scanned: 1-30`);
         console.log(`   Cassettes detected: ${enhancedInventory.summary.totalOccupied}`);
+        console.log(`   Timeout detections: ${fullScanResult.timeoutCount || 0}`);
+        console.log(`   Empty bins: ${fullScanResult.emptyCount || 0}`);
         console.log(`   Bin lamps activated: ${fullScanResult.detectedPositions?.length || 0}`);
         console.log(`   Auto-scan: ${enhancedInventory.summary.autoScanEnabled ? 'Active' : 'Inactive'}`);
         
+        // Show detection method summary
+        if (enhancedInventory.bins.length > 0) {
+            const detectionSummary = enhancedInventory.bins.reduce((acc, bin) => {
+                const category = bin.cassette.category || 'unknown';
+                acc[category] = (acc[category] || 0) + 1;
+                return acc;
+            }, {});
+            
+            console.log(`   Detection methods:`);
+            Object.entries(detectionSummary).forEach(([method, count]) => {
+                const icon = method === 'timeout_detected' ? '⏱️ ' : 
+                           method === 'scanned' ? '✅' :
+                           method === 'no_barcode' ? '🔍' : '📼';
+                console.log(`     ${icon} ${method}: ${count}`);
+            });
+        }
     } catch (error) {
         console.error('\n❌ Test failed:', error.message);
         console.error('Stack trace:', error.stack);

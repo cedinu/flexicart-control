@@ -1,18 +1,20 @@
 /**
  * FlexiCart Barcode Reading Module
  * Handles barcode scanning using FlexiCart's integrated barcode reader
- * Uses SENSE BIN STATUS (0x01, 0x62) and BIN STATUS RETURN (0x01, 0x72) commands
+ * Uses SENSE BIN STATUS (CMD: 0x62) and BIN STATUS RETURN (CMD: 0x72) commands
+ * Based on official FlexiCart protocol specification
  */
 
 const { createFlexiCartCommand, sendCommand } = require('./flexicart_serial_utils');
 
 /**
  * FlexiCart Commands for barcode reading and lamp control
+ * Based on official FlexiCart protocol specification
  */
 const BARCODE_COMMANDS = {
-    SENSE_BIN_STATUS: { cmd: 0x01, ctrl: 0x62, data: 0x80 },  // Request bin status with barcode
-    BIN_STATUS_RETURN: { cmd: 0x01, ctrl: 0x72, data: 0x80 }, // Bin status response with barcode data
-    SET_BIN_LAMP: { cmd: 0x01, ctrl: 0x09, data: 0x80 }       // Set bin lamp for detected cassettes
+    SENSE_BIN_STATUS: { cmd: 0x62, ctrl: 0x01, data: 0x80 },  // Request bin status with barcode
+    BIN_STATUS_RETURN: { cmd: 0x72, ctrl: 0x01, data: 0x80 }, // Bin status response with barcode data  
+    SET_BIN_LAMP: { cmd: 0x09, ctrl: 0x01, data: 0x80 }       // Set bin lamp for detected cassettes
 };
 
 /**
@@ -35,6 +37,10 @@ class FlexiCartBarcodeReader {
     
     /**
      * Read barcode from cassette at specified position using FlexiCart's integrated scanner
+     * Based on actual FlexiCart behavior analysis:
+     * - ACK (0x04) response = empty bin
+     * - Timeout = possibly occupied bin or barcode scanning in progress
+     * - Longer response = barcode data
      */
     async readBarcodeAtPosition(port, position, cartAddress = 0x01) {
         console.log(`🔍 Reading barcode at position ${position} using FlexiCart scanner...`);
@@ -42,35 +48,51 @@ class FlexiCartBarcodeReader {
         try {
             // Step 1: Send SENSE BIN STATUS command for the specific position
             const senseBinCommand = createFlexiCartCommand(
-                BARCODE_COMMANDS.SENSE_BIN_STATUS.cmd, 
-                position, // Use position as control byte
-                BARCODE_COMMANDS.SENSE_BIN_STATUS.data, 
-                cartAddress
+                cartAddress,                              // UA2 - Cart address
+                BARCODE_COMMANDS.SENSE_BIN_STATUS.cmd,    // CMD - 0x62
+                0x00,                                     // BT - Block type
+                position,                                 // CTRL - Position as control byte  
+                BARCODE_COMMANDS.SENSE_BIN_STATUS.data    // DATA - 0x80
             );
             
             console.log(`📡 Sending SENSE BIN STATUS command for position ${position}...`);
-            const response = await sendCommand(port, senseBinCommand, 5000); // Increased timeout
+            const response = await sendCommand(port, senseBinCommand, 3000); // Shorter timeout
             
             if (!response || response.length === 0) {
-                throw new Error('No response from FlexiCart SENSE BIN STATUS command');
-            }
-            
-            // If we get just ACK (0x04), the bin might be empty or command accepted
-            if (response.length === 1 && response[0] === 0x04) {
-                console.log(`📭 Position ${position}: Received ACK - bin likely empty or no barcode data`);
+                // No response might indicate occupied bin with barcode scan in progress
+                console.log(`🔄 Position ${position}: No immediate response - checking for barcode scan...`);
+                
+                // Wait a moment and try to get BIN STATUS RETURN data
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                const statusReturnCommand = createFlexiCartCommand(
+                    cartAddress,                               // UA2 - Cart address
+                    BARCODE_COMMANDS.BIN_STATUS_RETURN.cmd,    // CMD - 0x72
+                    0x00,                                      // BT - Block type
+                    position,                                  // CTRL - Position as control byte
+                    BARCODE_COMMANDS.BIN_STATUS_RETURN.data    // DATA - 0x80
+                );
+                
+                const statusResponse = await sendCommand(port, statusReturnCommand, 2000);
+                
+                if (statusResponse && statusResponse.length > 1) {
+                    return this.parseBinStatusResponse(statusResponse, position, true);
+                }
+                
+                // Still no response - treat as occupied bin with unknown barcode
                 return {
                     success: true,
                     position: position,
-                    binOccupied: false,
-                    barcode: null,
-                    message: 'Bin empty or no barcode available',
+                    binOccupied: true,
+                    barcode: `UNKNOWN_${position}`,
+                    message: 'Occupied bin - barcode scan timeout',
                     timestamp: new Date().toISOString(),
-                    rawResponse: response.toString('hex')
+                    rawResponse: 'timeout'
                 };
             }
             
-            // Step 2: Parse the bin status response which should contain barcode data
-            const barcodeData = this.parseBinStatusResponse(response, position);
+            // Parse the response
+            const barcodeData = this.parseBinStatusResponse(response, position, false);
             
             // Log scan history
             this.scanHistory.push({
@@ -83,6 +105,31 @@ class FlexiCartBarcodeReader {
             return barcodeData;
             
         } catch (error) {
+            // Timeout errors might indicate occupied bins
+            if (error.message.includes('timeout')) {
+                console.log(`⏱️  Position ${position}: Timeout - likely occupied bin scanning barcode`);
+                
+                const timeoutResult = {
+                    success: true,
+                    position: position,
+                    binOccupied: true,
+                    barcode: `TIMEOUT_${position}`,
+                    message: 'Occupied bin - barcode scan timeout',
+                    timestamp: new Date().toISOString(),
+                    rawResponse: 'timeout'
+                };
+                
+                // Log timeout as potential occupancy
+                this.scanHistory.push({
+                    position: position,
+                    timestamp: new Date().toISOString(),
+                    result: timeoutResult,
+                    rawResponse: 'timeout'
+                });
+                
+                return timeoutResult;
+            }
+            
             console.error(`❌ Barcode read failed at position ${position}:`, error.message);
             
             // Log failed attempt
@@ -115,10 +162,11 @@ class FlexiCartBarcodeReader {
             console.log(`💡 ${lampState ? 'Setting' : 'Clearing'} bin lamp at position ${position}...`);
             
             const lampCommand = createFlexiCartCommand(
-                BARCODE_COMMANDS.SET_BIN_LAMP.cmd,
-                position, // Position as control byte
-                lampState ? 0x01 : 0x00, // Lamp state as data byte
-                cartAddress
+                cartAddress,                           // UA2 - Cart address  
+                BARCODE_COMMANDS.SET_BIN_LAMP.cmd,     // CMD - 0x09
+                0x00,                                  // BT - Block type
+                position,                              // CTRL - Position as control byte
+                lampState ? 0x01 : 0x00               // DATA - Lamp state (0x01=on, 0x00=off)
             );
             
             const response = await sendCommand(port, lampCommand, 2000);
@@ -139,8 +187,8 @@ class FlexiCartBarcodeReader {
     /**
      * Parse bin status response to extract barcode information
      */
-    parseBinStatusResponse(response, position) {
-        console.log(`🔍 Parsing bin status response: ${response.toString('hex')}`);
+    parseBinStatusResponse(response, position, isStatusReturn = false) {
+        console.log(`🔍 Parsing ${isStatusReturn ? 'STATUS RETURN' : 'SENSE BIN'} response: ${response.toString('hex')}`);
         
         // FlexiCart bin status response analysis
         const responseAnalysis = {
@@ -151,36 +199,23 @@ class FlexiCartBarcodeReader {
         
         console.log(`📊 Response analysis:`, responseAnalysis);
         
-        // Check for different response types
+        // Handle ACK response (empty bin)
         if (response.length === 1 && response[0] === 0x04) {
-            // ACK response - bin might be empty
+            console.log(`📭 Position ${position}: ACK response - bin is empty`);
             return {
                 success: true,
                 position: position,
                 binOccupied: false,
                 barcode: null,
-                message: 'ACK received - bin likely empty',
+                message: 'ACK received - bin is empty',
                 timestamp: new Date().toISOString(),
                 rawResponse: response.toString('hex')
             };
         }
         
-        // Look for longer responses that might contain barcode data
+        // Handle longer responses that might contain barcode data
         if (response.length > 1) {
-            // Check if bin is occupied based on response structure
-            const binOccupied = this.checkBinOccupied(response);
-            
-            if (!binOccupied) {
-                return {
-                    success: true,
-                    position: position,
-                    binOccupied: false,
-                    barcode: null,
-                    message: 'Bin is empty',
-                    timestamp: new Date().toISOString(),
-                    rawResponse: response.toString('hex')
-                };
-            }
+            console.log(`📼 Position ${position}: Extended response - bin likely occupied`);
             
             // Extract barcode from response
             const barcodeInfo = this.extractBarcodeFromResponse(response, position);
@@ -198,13 +233,14 @@ class FlexiCartBarcodeReader {
             };
         }
         
-        // Default case - treat as empty bin
+        // Default case - unknown response
+        console.log(`❓ Position ${position}: Unknown response pattern`);
         return {
             success: true,
             position: position,
             binOccupied: false,
             barcode: null,
-            message: 'Short response - bin likely empty',
+            message: 'Unknown response pattern - assuming empty',
             timestamp: new Date().toISOString(),
             rawResponse: response.toString('hex')
         };
@@ -529,16 +565,34 @@ class FlexiCartBarcodeIntegration {
             }
             
             // Bin is occupied - create cassette entry
+            let cassetteTitle = `Position ${position}`;
+            let cassetteCategory = 'unknown';
+            
+            // Determine cassette type based on barcode pattern
+            if (scanResult.barcode) {
+                if (scanResult.barcode.includes('TIMEOUT')) {
+                    cassetteTitle = `Cassette at ${position} (Scan Timeout)`;
+                    cassetteCategory = 'timeout_detected';
+                } else if (scanResult.barcode.includes('UNKNOWN')) {
+                    cassetteTitle = `Cassette at ${position} (No Barcode)`;
+                    cassetteCategory = 'no_barcode';
+                } else {
+                    cassetteTitle = `Cassette ${scanResult.barcode}`;
+                    cassetteCategory = 'scanned';
+                }
+            }
+            
             const cassetteData = {
-                id: scanResult.barcode || `FC_POS_${position}`, // Use barcode as ID or fallback
+                id: scanResult.barcode || `FC_POS_${position}`,
                 barcode: scanResult.barcode,
                 scannedBarcode: scanResult.barcode,
                 barcodeValid: scanResult.valid,
                 lastBarcodeRead: scanResult.timestamp,
                 barcodeReadCount: 1,
-                format: scanResult.format,
-                title: scanResult.barcode ? `Cassette ${scanResult.barcode}` : `Position ${position}`,
-                category: 'detected',
+                format: scanResult.format || 'FlexiCart_Detected',
+                title: cassetteTitle,
+                category: cassetteCategory,
+                detectionMethod: scanResult.message,
                 ...scanResult.metadata,
                 rawScanData: scanResult.rawResponse
             };
@@ -546,8 +600,14 @@ class FlexiCartBarcodeIntegration {
             // Add to inventory
             this.stateManager.inventory.setCassette(position, cassetteData);
             
-            // Set bin lamp for detected cassettes
-            await this.barcodeReader.setBinLamp(this.serialPort, position, true, cartAddress);
+            // Set bin lamp for detected cassettes (only if not timeout to avoid lamp command timeouts)
+            if (!scanResult.barcode?.includes('TIMEOUT')) {
+                try {
+                    await this.barcodeReader.setBinLamp(this.serialPort, position, true, cartAddress);
+                } catch (lampError) {
+                    console.warn(`⚠️  Could not set lamp for position ${position}: ${lampError.message}`);
+                }
+            }
             
             console.log(`✅ Cassette detected: ${scanResult.barcode || 'Unknown ID'} at position ${position}`);
             
@@ -604,11 +664,33 @@ class FlexiCartBarcodeIntegration {
         
         // Update inventory with scan results and set lamps for detected cassettes
         let updatedCount = 0;
+        let timeoutCount = 0;
+        let emptyCount = 0;
         const detectedPositions = [];
+        const timeoutPositions = [];
         
         for (const result of scanResult.results) {
             if (result.success) {
                 if (result.binOccupied) {
+                    // Determine cassette type based on detection method
+                    let cassetteTitle = `Position ${result.position}`;
+                    let cassetteCategory = 'unknown';
+                    
+                    if (result.barcode) {
+                        if (result.barcode.includes('TIMEOUT')) {
+                            cassetteTitle = `Cassette at ${result.position} (Scan Timeout)`;
+                            cassetteCategory = 'timeout_detected';
+                            timeoutCount++;
+                            timeoutPositions.push(result.position);
+                        } else if (result.barcode.includes('UNKNOWN')) {
+                            cassetteTitle = `Cassette at ${result.position} (No Barcode)`;
+                            cassetteCategory = 'no_barcode';
+                        } else {
+                            cassetteTitle = `Cassette ${result.barcode}`;
+                            cassetteCategory = 'scanned';
+                        }
+                    }
+                    
                     // Add occupied bin to inventory
                     const cassetteData = {
                         id: result.barcode || `FC_POS_${result.position}`,
@@ -616,9 +698,10 @@ class FlexiCartBarcodeIntegration {
                         scannedBarcode: result.barcode,
                         barcodeValid: result.valid,
                         lastBarcodeRead: result.timestamp,
-                        format: result.format,
-                        title: result.barcode ? `Cassette ${result.barcode}` : `Position ${result.position}`,
-                        category: 'detected',
+                        format: result.format || 'FlexiCart_Detected',
+                        title: cassetteTitle,
+                        category: cassetteCategory,
+                        detectionMethod: result.message,
                         ...result.metadata,
                         rawScanData: result.rawResponse
                     };
@@ -627,13 +710,27 @@ class FlexiCartBarcodeIntegration {
                     detectedPositions.push(result.position);
                     updatedCount++;
                     
-                    // Set bin lamp for detected cassettes
-                    await this.barcodeReader.setBinLamp(this.serialPort, result.position, true, cartAddress);
+                    // Set bin lamp for detected cassettes (avoid for timeout positions to prevent more timeouts)
+                    if (!result.barcode?.includes('TIMEOUT')) {
+                        try {
+                            await this.barcodeReader.setBinLamp(this.serialPort, result.position, true, cartAddress);
+                        } catch (lampError) {
+                            console.warn(`⚠️  Could not set lamp for position ${result.position}: ${lampError.message}`);
+                        }
+                    }
                     
                 } else {
                     // Ensure empty bins are marked as unoccupied and lamps are off
                     this.stateManager.inventory.removeCassette(result.position);
-                    await this.barcodeReader.setBinLamp(this.serialPort, result.position, false, cartAddress);
+                    emptyCount++;
+                    
+                    // Turn off lamps for empty bins (with error handling)
+                    try {
+                        await this.barcodeReader.setBinLamp(this.serialPort, result.position, false, cartAddress);
+                    } catch (lampError) {
+                        // Ignore lamp errors for empty bins - they're likely already off
+                        console.debug(`Lamp clear failed for empty position ${result.position} (expected)`);
+                    }
                 }
             }
         }
@@ -641,14 +738,22 @@ class FlexiCartBarcodeIntegration {
         console.log(`✅ Full inventory scan completed:`);
         console.log(`   ${updatedCount} cassettes found and updated`);
         console.log(`   ${detectedPositions.length} bin lamps activated`);
+        console.log(`   ${timeoutCount} timeout-detected cassettes`);
+        console.log(`   ${emptyCount} empty bins confirmed`);
         if (detectedPositions.length > 0) {
             console.log(`   Detected positions: ${detectedPositions.join(', ')}`);
+        }
+        if (timeoutPositions.length > 0) {
+            console.log(`   Timeout positions: ${timeoutPositions.join(', ')} (likely cassettes with barcode scan issues)`);
         }
         
         return {
             ...scanResult,
             inventoryUpdated: updatedCount,
-            detectedPositions: detectedPositions
+            detectedPositions: detectedPositions,
+            timeoutPositions: timeoutPositions,
+            emptyCount: emptyCount,
+            timeoutCount: timeoutCount
         };
     }
     
