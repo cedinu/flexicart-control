@@ -1,7 +1,10 @@
 /**
  * FlexiCart Data Structures
  * Comprehensive data structures for tracking FlexiCart status, operations, and cassette occupancy
+ * Includes barcode reading integration for accurate cassette identification
  */
+
+const { FlexiCartBarcodeReader, FlexiCartBarcodeIntegration } = require('./flexicart_barcode_reader');
 
 /**
  * FlexiCart System Status Structure
@@ -299,7 +302,7 @@ class CassetteBinOccupancy {
     }
     
     /**
-     * Set cassette in specific bin
+     * Set cassette in specific bin with barcode reading
      */
     setCassette(binNumber, cassetteDetails) {
         if (binNumber < 1 || binNumber > this.maxBins) {
@@ -310,6 +313,9 @@ class CassetteBinOccupancy {
         bin.occupied = true;
         bin.cassette = {
             id: cassetteDetails.id || `CART_${binNumber}`,
+            barcode: cassetteDetails.barcode || null, // Actual barcode from cassette
+            scannedBarcode: cassetteDetails.scannedBarcode || null, // Last scanned barcode
+            barcodeValid: cassetteDetails.barcodeValid !== undefined ? cassetteDetails.barcodeValid : null,
             type: cassetteDetails.type || 'unknown', // 'A', 'B', 'C' (NAB cart types)
             length: cassetteDetails.length || 0, // in seconds
             title: cassetteDetails.title || '',
@@ -320,6 +326,8 @@ class CassetteBinOccupancy {
             playCount: cassetteDetails.playCount || 0,
             dateAdded: cassetteDetails.dateAdded || new Date().toISOString(),
             lastPlayed: cassetteDetails.lastPlayed || null,
+            lastBarcodeRead: cassetteDetails.lastBarcodeRead || null,
+            barcodeReadCount: cassetteDetails.barcodeReadCount || 0,
             metadata: cassetteDetails.metadata || {}
         };
         bin.lastAccessed = new Date().toISOString();
@@ -414,6 +422,99 @@ class CassetteBinOccupancy {
             }
         }
         return empty.sort((a, b) => a - b);
+    }
+    
+    /**
+     * Update cassette barcode information
+     */
+    updateCassetteBarcode(binNumber, barcodeData) {
+        if (binNumber < 1 || binNumber > this.maxBins) {
+            throw new Error(`Invalid bin number: ${binNumber}`);
+        }
+        
+        const bin = this.bins.get(binNumber);
+        if (!bin.occupied || !bin.cassette) {
+            throw new Error(`No cassette in bin ${binNumber}`);
+        }
+        
+        // Update barcode information
+        bin.cassette.scannedBarcode = barcodeData.barcode;
+        bin.cassette.barcodeValid = barcodeData.valid;
+        bin.cassette.lastBarcodeRead = new Date().toISOString();
+        bin.cassette.barcodeReadCount = (bin.cassette.barcodeReadCount || 0) + 1;
+        
+        // If barcode is valid, update the cassette ID
+        if (barcodeData.valid && barcodeData.barcode) {
+            bin.cassette.barcode = barcodeData.barcode;
+            bin.cassette.id = barcodeData.barcode; // Use barcode as primary ID
+            
+            // Update metadata if provided
+            if (barcodeData.metadata) {
+                Object.assign(bin.cassette.metadata, barcodeData.metadata);
+            }
+            
+            // Update title/artist if provided from barcode database lookup
+            if (barcodeData.title) bin.cassette.title = barcodeData.title;
+            if (barcodeData.artist) bin.cassette.artist = barcodeData.artist;
+            if (barcodeData.duration) bin.cassette.duration = barcodeData.duration;
+            if (barcodeData.category) bin.cassette.category = barcodeData.category;
+        }
+        
+        bin.lastAccessed = new Date().toISOString();
+        this.inventoryVersion++;
+        
+        return bin.cassette;
+    }
+    
+    /**
+     * Find cassette by barcode
+     */
+    findCassetteByBarcode(barcode) {
+        for (const bin of this.bins.values()) {
+            if (bin.occupied && bin.cassette && 
+                (bin.cassette.barcode === barcode || bin.cassette.scannedBarcode === barcode)) {
+                return {
+                    binNumber: bin.binNumber,
+                    cassette: bin.cassette
+                };
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Get cassettes with invalid or missing barcodes
+     */
+    getCassettesWithBarcodeIssues() {
+        const issues = [];
+        
+        for (const bin of this.bins.values()) {
+            if (bin.occupied && bin.cassette) {
+                const cassette = bin.cassette;
+                
+                if (!cassette.barcode && !cassette.scannedBarcode) {
+                    issues.push({
+                        binNumber: bin.binNumber,
+                        issue: 'no_barcode',
+                        cassette: cassette
+                    });
+                } else if (cassette.barcodeValid === false) {
+                    issues.push({
+                        binNumber: bin.binNumber,
+                        issue: 'invalid_barcode',
+                        cassette: cassette
+                    });
+                } else if (cassette.barcode !== cassette.scannedBarcode) {
+                    issues.push({
+                        binNumber: bin.binNumber,
+                        issue: 'barcode_mismatch',
+                        cassette: cassette
+                    });
+                }
+            }
+        }
+        
+        return issues;
     }
     
     /**
@@ -530,6 +631,9 @@ class FlexiCartStateManager {
         this.operations = new FlexiCartOperations();
         this.inventory = new CassetteBinOccupancy(maxPositions);
         
+        // Initialize barcode integration
+        this.barcodeIntegration = new FlexiCartBarcodeIntegration(this);
+        
         // Event handling
         this.eventHandlers = new Map();
         
@@ -606,11 +710,141 @@ class FlexiCartStateManager {
     }
     
     /**
-     * Cleanup resources
+     * Barcode Integration Methods
+     */
+    
+    /**
+     * Scan barcode at specific position
+     */
+    async scanBarcodeAtPosition(position) {
+        return await this.barcodeIntegration.scanAndUpdateCassette(position);
+    }
+    
+    /**
+     * Scan all occupied positions for barcodes
+     */
+    async scanAllBarcodes() {
+        return await this.barcodeIntegration.scanAllOccupiedPositions();
+    }
+    
+    /**
+     * Enable automatic barcode scanning
+     */
+    enableAutoBarcodeScanning() {
+        this.barcodeIntegration.enableAutoScan();
+    }
+    
+    /**
+     * Disable automatic barcode scanning
+     */
+    disableAutoBarcodeScanning() {
+        this.barcodeIntegration.disableAutoScan();
+    }
+    
+    /**
+     * Get barcode statistics
+     */
+    getBarcodeStats() {
+        return this.barcodeIntegration.getStats();
+    }
+    
+    /**
+     * Get cassettes with barcode issues
+     */
+    getCassettesWithBarcodeIssues() {
+        return this.inventory.getCassettesWithBarcodeIssues();
+    }
+    
+    /**
+     * Update cassette barcode information
+     */
+    updateCassetteBarcode(position, barcode, metadata = {}) {
+        const cassette = this.inventory.getCassette(position);
+        if (cassette && cassette.occupied) {
+            this.inventory.setCassette(position, {
+                ...cassette.cassette,
+                barcode: barcode,
+                scannedBarcode: barcode,
+                barcodeValid: true,
+                lastBarcodeRead: new Date().toISOString(),
+                barcodeReadCount: (cassette.cassette.barcodeReadCount || 0) + 1,
+                ...metadata
+            });
+            
+            this.emit('barcodeUpdate', {
+                position: position,
+                barcode: barcode,
+                metadata: metadata
+            });
+            
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Get enhanced inventory view with barcode information
+     */
+    getInventoryWithBarcodes() {
+        const occupiedBins = this.inventory.getOccupiedBins();
+        const barcodeIssues = this.inventory.getCassettesWithBarcodeIssues();
+        const barcodeStats = this.barcodeIntegration.getStats();
+        
+        return {
+            bins: occupiedBins.map(bin => ({
+                ...bin,
+                barcodeStatus: this.getBarcodeStatus(bin.cassette),
+                needsScan: this.needsBarcodeRescan(bin.cassette)
+            })),
+            issues: barcodeIssues,
+            stats: barcodeStats,
+            summary: {
+                totalOccupied: occupiedBins.length,
+                withValidBarcodes: occupiedBins.filter(bin => 
+                    bin.cassette.barcodeValid === true
+                ).length,
+                needsScanning: barcodeIssues.length,
+                autoScanEnabled: barcodeStats.autoScan
+            }
+        };
+    }
+    
+    /**
+     * Determine barcode status for a cassette
+     */
+    getBarcodeStatus(cassette) {
+        if (!cassette.barcode && !cassette.scannedBarcode) {
+            return 'no_barcode';
+        }
+        if (cassette.barcodeValid === false) {
+            return 'invalid';
+        }
+        if (cassette.barcode !== cassette.scannedBarcode) {
+            return 'mismatch';
+        }
+        if (cassette.barcodeValid === true) {
+            return 'valid';
+        }
+        return 'unknown';
+    }
+    
+    /**
+     * Check if cassette needs barcode rescan
+     */
+    needsBarcodeRescan(cassette) {
+        const status = this.getBarcodeStatus(cassette);
+        return status === 'no_barcode' || status === 'invalid' || status === 'mismatch';
+    }
+    
+    /**
+     * Cleanup resources including barcode integration
      */
     destroy() {
         if (this.cleanupTimer) {
             clearInterval(this.cleanupTimer);
+        }
+        if (this.barcodeIntegration) {
+            this.barcodeIntegration.disableAutoScan();
         }
         this.eventHandlers.clear();
     }
