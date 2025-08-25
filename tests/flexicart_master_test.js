@@ -279,6 +279,84 @@ async function sendCommandOnSharedPort(serialPort, command, commandName, timeout
 }
 
 /**
+ * Send command using individual port connection (for backward compatibility)
+ */
+async function sendCommand(port, command, timeout = FLEXICART_CONFIG.DEFAULT_TIMEOUT) {
+    return new Promise((resolve, reject) => {
+        const SerialPort = require('serialport');
+        const serialPort = new SerialPort({
+            path: port,
+            baudRate: FLEXICART_CONFIG.BAUD_RATE,
+            dataBits: FLEXICART_CONFIG.DATA_BITS,
+            parity: FLEXICART_CONFIG.PARITY,
+            stopBits: FLEXICART_CONFIG.STOP_BITS,
+            autoOpen: false
+        });
+        
+        const chunks = [];
+        let timeoutHandle;
+        let isResolved = false;
+        
+        const cleanup = () => {
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            if (serialPort.isOpen) {
+                serialPort.close(() => {});
+            }
+        };
+        
+        const safeResolve = (value) => {
+            if (!isResolved) {
+                isResolved = true;
+                cleanup();
+                resolve(value);
+            }
+        };
+        
+        const safeReject = (error) => {
+            if (!isResolved) {
+                isResolved = true;
+                cleanup();
+                reject(error);
+            }
+        };
+        
+        try {
+            serialPort.on('data', (chunk) => {
+                chunks.push(chunk);
+            });
+            
+            serialPort.on('error', (error) => {
+                safeReject(new Error(`Serial port error: ${error.message}`));
+            });
+            
+            serialPort.open((error) => {
+                if (error) {
+                    safeReject(new Error(`Failed to open port: ${error.message}`));
+                    return;
+                }
+                
+                serialPort.write(command, (writeError) => {
+                    if (writeError) {
+                        safeReject(new Error(`Failed to write command: ${writeError.message}`));
+                        return;
+                    }
+                    
+                    serialPort.drain(() => {
+                        timeoutHandle = setTimeout(() => {
+                            const response = Buffer.concat(chunks);
+                            safeResolve(response);
+                        }, timeout);
+                    });
+                });
+            });
+            
+        } catch (error) {
+            safeReject(new Error(`Setup error: ${error.message}`));
+        }
+    });
+}
+
+/**
  * Execute macro command with proper ACK/NACK handling and status polling
  */
 async function executeMacroCommand(port, commandDef, cartAddress = FLEXICART_CONFIG.DEFAULT_CART_ADDRESS, maxRetries = 50) {
