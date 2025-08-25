@@ -66,96 +66,75 @@ function createCommand(cmd, ctrl = 0x00, data = 0x80, cartAddress = 0x01, format
 }
 
 /**
- * Test single command
+ * Send single command on open port (prevents port locking)
  */
-async function testSingleCommand(port, command, commandName, expectedResponse = 'any') {
+function sendCommandOnPort(serialPort, command, commandName) {
     return new Promise((resolve) => {
-        const serialPort = new SerialPort({
-            path: port,
-            baudRate: CONFIG.BAUD_RATE,
-            dataBits: CONFIG.DATA_BITS,
-            parity: CONFIG.PARITY,
-            stopBits: CONFIG.STOP_BITS,
-            autoOpen: false
-        });
-        
         const chunks = [];
         let timeoutHandle;
         
         const cleanup = () => {
             if (timeoutHandle) clearTimeout(timeoutHandle);
-            if (serialPort.isOpen) {
-                serialPort.close(() => {});
-            }
+            serialPort.removeAllListeners('data');
         };
         
-        serialPort.on('data', (chunk) => chunks.push(chunk));
-        serialPort.on('error', () => {
-            cleanup();
-            resolve({ success: false, error: 'Serial error', command: commandName });
+        serialPort.on('data', (chunk) => {
+            chunks.push(chunk);
         });
         
-        serialPort.open((error) => {
-            if (error) {
+        serialPort.write(command, (writeError) => {
+            if (writeError) {
                 cleanup();
-                resolve({ success: false, error: `Port open failed: ${error.message}`, command: commandName });
+                resolve({ success: false, error: `Write failed: ${writeError.message}`, command: commandName });
                 return;
             }
             
-            serialPort.write(command, (writeError) => {
-                if (writeError) {
+            serialPort.drain(() => {
+                timeoutHandle = setTimeout(() => {
                     cleanup();
-                    resolve({ success: false, error: `Write failed: ${writeError.message}`, command: commandName });
-                    return;
-                }
-                
-                serialPort.drain(() => {
-                    timeoutHandle = setTimeout(() => {
-                        cleanup();
+                    
+                    const response = Buffer.concat(chunks);
+                    const hex = response.toString('hex').match(/.{2}/g)?.join(' ') || 'no response';
+                    
+                    let responseType = 'none';
+                    let isAccepted = false;
+                    
+                    if (response.length > 0) {
+                        const firstByte = response[0];
                         
-                        const response = Buffer.concat(chunks);
-                        const hex = response.toString('hex').match(/.{2}/g)?.join(' ') || 'no response';
-                        
-                        let responseType = 'none';
-                        let isAccepted = false;
-                        
-                        if (response.length > 0) {
-                            const firstByte = response[0];
-                            
-                            if (firstByte === 0x04) {
-                                responseType = 'ACK';
-                                isAccepted = true;
-                            } else if (firstByte === 0x05) {
-                                responseType = 'NACK';
-                                isAccepted = false;
-                            } else if (firstByte === 0x06) {
-                                responseType = 'BUSY';
-                                isAccepted = true; // Device is responding
-                            } else {
-                                responseType = 'DATA';
-                                isAccepted = true;
-                            }
+                        if (firstByte === 0x04) {
+                            responseType = 'ACK';
+                            isAccepted = true;
+                        } else if (firstByte === 0x05) {
+                            responseType = 'NACK';
+                            isAccepted = false;
+                        } else if (firstByte === 0x06) {
+                            responseType = 'BUSY';
+                            isAccepted = true; // Device is responding
+                        } else {
+                            responseType = 'DATA';
+                            isAccepted = true;
                         }
-                        
-                        resolve({
-                            success: response.length > 0,
-                            command: commandName,
-                            hex: hex,
-                            length: response.length,
-                            responseType: responseType,
-                            isAccepted: isAccepted,
-                            firstByte: response.length > 0 ? response[0] : null
-                        });
-                        
-                    }, CONFIG.TIMEOUT);
-                });
+                    }
+                    
+                    resolve({
+                        success: response.length > 0,
+                        command: commandName,
+                        hex: hex,
+                        length: response.length,
+                        responseType: responseType,
+                        isAccepted: isAccepted,
+                        firstByte: response.length > 0 ? response[0] : null
+                    });
+                    
+                }, CONFIG.TIMEOUT);
             });
         });
     });
 }
 
 /**
- * Discover working commands
+ * Discover working commands using single connection (prevents port locking)
  */
 async function discoverCommands(port = CONFIG.PORT, cartAddress = 0x01) {
     console.log(`\n🔍 FlexiCart Command Discovery`);
@@ -182,86 +161,147 @@ async function discoverCommands(port = CONFIG.PORT, cartAddress = 0x01) {
         { name: 'Minimal Ping', cmd: 0x00, ctrl: 0x00, format: 'minimal' }
     ];
     
-    const results = [];
-    const acceptedCommands = [];
-    
-    for (const cmdTest of basicCommands) {
-        const command = createCommand(cmdTest.cmd, cmdTest.ctrl, 0x80, cartAddress, cmdTest.format);
-        
-        console.log(`📤 Testing: ${cmdTest.name} (${cmdTest.format} format)`);
-        console.log(`   Command: ${command.toString('hex').match(/.{2}/g)?.join(' ')}`);
-        
-        const result = await testSingleCommand(port, command, cmdTest.name);
-        results.push(result);
-        
-        if (result.success) {
-            console.log(`   📥 Response: ${result.hex} (${result.responseType})`);
-            
-            if (result.isAccepted) {
-                console.log(`   ✅ ACCEPTED by FlexiCart`);
-                acceptedCommands.push(result);
-            } else {
-                console.log(`   ❌ REJECTED (NACK)`);
-            }
-        } else {
-            console.log(`   💥 ERROR: ${result.error}`);
-        }
-        
-        console.log('');
-        
-        // Short delay between tests
-        await new Promise(resolve => setTimeout(resolve, 300));
-    }
-    
-    // Summary
-    console.log(`\n📊 DISCOVERY SUMMARY`);
-    console.log(`====================`);
-    console.log(`Total Commands Tested: ${results.length}`);
-    console.log(`Commands with Responses: ${results.filter(r => r.success).length}`);
-    console.log(`Commands ACCEPTED: ${acceptedCommands.length}`);
-    console.log(`Commands REJECTED: ${results.filter(r => r.success && !r.isAccepted).length}`);
-    
-    if (acceptedCommands.length > 0) {
-        console.log(`\n✅ ACCEPTED COMMANDS:`);
-        acceptedCommands.forEach(cmd => {
-            console.log(`   ${cmd.command}: ${cmd.hex} → ${cmd.responseType}`);
+    return new Promise((resolve) => {
+        const serialPort = new SerialPort({
+            path: port,
+            baudRate: CONFIG.BAUD_RATE,
+            dataBits: CONFIG.DATA_BITS,
+            parity: CONFIG.PARITY,
+            stopBits: CONFIG.STOP_BITS,
+            autoOpen: false
         });
         
-        console.log(`\n🎯 RECOMMENDATIONS:`);
-        console.log(`Use these accepted commands as basis for further testing`);
+        const results = [];
+        const acceptedCommands = [];
+        let commandIndex = 0;
         
-        // Find the simplest working command format
-        const formats = [...new Set(acceptedCommands.map(cmd => {
-            // Determine format from command length
-            if (cmd.hex.split(' ').length === 9) return 'standard';
-            if (cmd.hex.split(' ').length === 4) return 'simple';
-            if (cmd.hex.split(' ').length === 2) return 'minimal';
-            return 'unknown';
-        }))];
+        const cleanup = () => {
+            if (serialPort.isOpen) {
+                serialPort.close(() => {
+                    finishDiscovery();
+                });
+            } else {
+                finishDiscovery();
+            }
+        };
         
-        console.log(`Working formats: ${formats.join(', ')}`);
-    } else {
-        console.log(`\n❌ NO COMMANDS ACCEPTED`);
-        console.log(`This suggests:`);
-        console.log(`   - FlexiCart may not be responding`);
-        console.log(`   - Different protocol required`);
-        console.log(`   - Different cart address needed`);
-        console.log(`   - Hardware/connection issues`);
-    }
-    
-    return {
-        totalTested: results.length,
-        acceptedCount: acceptedCommands.length,
-        acceptedCommands: acceptedCommands,
-        allResults: results
-    };
+        const finishDiscovery = () => {
+            // Summary
+            console.log(`\n📊 DISCOVERY SUMMARY`);
+            console.log(`====================`);
+            console.log(`Total Commands Tested: ${results.length}`);
+            console.log(`Commands with Responses: ${results.filter(r => r.success).length}`);
+            console.log(`Commands ACCEPTED: ${acceptedCommands.length}`);
+            console.log(`Commands REJECTED: ${results.filter(r => r.success && !r.isAccepted).length}`);
+            
+            if (acceptedCommands.length > 0) {
+                console.log(`\n✅ ACCEPTED COMMANDS:`);
+                acceptedCommands.forEach(cmd => {
+                    console.log(`   ${cmd.command}: ${cmd.hex} → ${cmd.responseType}`);
+                });
+                
+                console.log(`\n🎯 RECOMMENDATIONS:`);
+                console.log(`Use these accepted commands as basis for further testing`);
+                
+                // Find the simplest working command format
+                const formats = [...new Set(acceptedCommands.map(cmd => {
+                    // Determine format from command length
+                    if (cmd.hex.split(' ').length === 9) return 'standard';
+                    if (cmd.hex.split(' ').length === 4) return 'simple';
+                    if (cmd.hex.split(' ').length === 2) return 'minimal';
+                    return 'unknown';
+                }))];
+                
+                console.log(`Working formats: ${formats.join(', ')}`);
+            } else {
+                console.log(`\n❌ NO COMMANDS ACCEPTED`);
+                console.log(`This suggests:`);
+                console.log(`   - FlexiCart may not be responding`);
+                console.log(`   - Different protocol required`);
+                console.log(`   - Different cart address needed`);
+                console.log(`   - Hardware/connection issues`);
+            }
+            
+            resolve({
+                totalTested: results.length,
+                acceptedCount: acceptedCommands.length,
+                acceptedCommands: acceptedCommands,
+                allResults: results
+            });
+        };
+        
+        const processNextCommand = async () => {
+            if (commandIndex >= basicCommands.length) {
+                cleanup();
+                return;
+            }
+            
+            const cmdTest = basicCommands[commandIndex];
+            const command = createCommand(cmdTest.cmd, cmdTest.ctrl, 0x80, cartAddress, cmdTest.format);
+            
+            console.log(`📤 Testing: ${cmdTest.name} (${cmdTest.format} format)`);
+            console.log(`   Command: ${command.toString('hex').match(/.{2}/g)?.join(' ')}`);
+            
+            try {
+                const result = await sendCommandOnPort(serialPort, command, cmdTest.name);
+                results.push(result);
+                
+                if (result.success) {
+                    console.log(`   📥 Response: ${result.hex} (${result.responseType})`);
+                    
+                    if (result.isAccepted) {
+                        console.log(`   ✅ ACCEPTED by FlexiCart`);
+                        acceptedCommands.push(result);
+                    } else {
+                        console.log(`   ❌ REJECTED (NACK)`);
+                    }
+                } else {
+                    console.log(`   💥 ERROR: ${result.error}`);
+                }
+                
+            } catch (error) {
+                results.push({
+                    success: false,
+                    error: error.message,
+                    command: cmdTest.name
+                });
+                console.log(`   💥 Exception: ${error.message}`);
+            }
+            
+            console.log('');
+            commandIndex++;
+            
+            // Short delay between commands
+            setTimeout(processNextCommand, 200);
+        };
+        
+        serialPort.on('error', (error) => {
+            console.error(`Serial port error: ${error.message}`);
+            cleanup();
+        });
+        
+        serialPort.open((error) => {
+            if (error) {
+                console.error(`Failed to open port: ${error.message}`);
+                resolve([{
+                    success: false,
+                    error: `Port open failed: ${error.message}`,
+                    commandName: 'PORT_OPEN'
+                }]);
+                return;
+            }
+            
+            console.log(`✅ Port ${port} opened successfully`);
+            processNextCommand();
+        });
+    });
 }
 
 // Export for use in other modules
 module.exports = {
     CONFIG,
     createCommand,
-    testSingleCommand,
+    sendCommandOnPort,
     discoverCommands
 };
 
