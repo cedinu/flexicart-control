@@ -256,16 +256,16 @@ async function discoverCommands(port = CONFIG.PORT, cartAddress = 0x01) {
                         console.log(`   ❌ REJECTED (NACK)`);
                     }
                 } else {
-                    console.log(`   💥 ERROR: ${result.error}`);
+                    console.log(`   💥 ERROR: ${result.error || 'Unknown error'}`);
                 }
                 
             } catch (error) {
                 results.push({
                     success: false,
-                    error: error.message,
+                    error: error.message || 'Unknown exception',
                     command: cmdTest.name
                 });
-                console.log(`   💥 Exception: ${error.message}`);
+                console.log(`   💥 Exception: ${error.message || 'Unknown exception'}`);
             }
             
             console.log('');

@@ -16,6 +16,8 @@
     "flexicart:test": "node tests/flexicart_test_runner.js",
     "flexicart:comm": "node tests/flexicart_communication_validator.js",
     "flexicart:enhanced": "node tests/flexicart_enhanced_validator.js",
+    "flexicart:reality": "node tests/flexicart_reality_check.js",
+    "flexicart:checksum": "node tests/flexicart_checksum_test.js",
     "flexicart:status": "node tests/flexicart_status_test.js",
     "flexicart:macro": "node tests/flexicart_macro_test.js",
     "flexicart:master": "node tests/flexicart_master_test.js",
