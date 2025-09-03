@@ -22,12 +22,6 @@ The system provides HTTP/HTTPS REST APIs and WebSocket connectivity for real-tim
 src/
 ├── index.js                           # Main server entry point (Express + WebSocket)
 └── commands/                          # Device communication modules
-    ├── vtr_interface.js               # VTR device integration interface
-    ├── vtr_commands.js                # Sony VTR protocol commands  
-    ├── vtr_cmds_status.js             # VTR status query functions
-    ├── vtr_cmds_transport.js          # VTR transport control functions
-    ├── vtr_status_parser.js           # Sony VTR response parsing
-    ├── vtr.js                         # VTR device abstraction
     ├── flexicart_interface.js         # FlexiCart integration interface
     ├── flexicart.js                   # FlexiCart device abstraction
     ├── flexicart_cmds_status.js       # FlexiCart status functions
